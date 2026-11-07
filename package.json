@@ -1,0 +1,37 @@
+{
+  "name": "echoforge",
+  "productName": "EchoForge",
+  "version": "0.1.0",
+  "description": "EchoForge - next-gen console emulation launcher",
+  "author": "EchoForge contributors",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "postinstall": "node node_modules/electron/install.js"
+  },
+  "license": "GPL-3.0-or-later",
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "app.echoforge.launcher",
+    "productName": "EchoForge",
+    "copyright": "EchoForge contributors · GPL-3.0-or-later",
+    "files": ["app/**/*", "package.json"],
+    "directories": { "output": "dist" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "app/assets/icon.ico" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EchoForge",
+      "installerIcon": "app/assets/icon.ico",
+      "uninstallerIcon": "app/assets/icon.ico",
+      "artifactName": "EchoForge-Setup-${version}.${ext}"
+    }
+  }
+}

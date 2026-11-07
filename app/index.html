@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="ember" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>EchoForge</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="bgart" id="bgArt"><i></i><i></i></div>
+<div class="bgfx"></div>
+
+<header class="titlebar">
+  <div class="brand"><img src="assets/logo.svg" alt=""><div class="wordmark">ECHO<b>FORGE</b></div></div>
+  <label class="search" title="Search every library (Ctrl+F)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" placeholder="Search all games" spellcheck="false" data-nav>
+    <kbd>Ctrl F</kbd>
+  </label>
+  <div class="tb-spacer"></div>
+  <div class="nowplaying" id="np"><span class="dot"></span><span id="npText">Playing</span><button class="btn sm danger" data-act="stopGame">Stop</button></div>
+  <div class="winbtns">
+    <button data-act="bigpic" title="Big Picture mode (F10)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="1"/><path d="M8 21h8M12 17v4"/></svg></button>
+    <button data-act="winMin" title="Minimize"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+    <button data-act="winMax" title="Maximize"><svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+    <button class="x" data-act="winClose" title="Close"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0 0 10" stroke="currentColor"/></svg></button>
+  </div>
+</header>
+
+<nav class="side" id="side"></nav>
+<main class="main" id="main"></main>
+<div id="modal"></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="data.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>
