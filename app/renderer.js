@@ -40,6 +40,7 @@ const DEFAULTS = {
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true,
+  emuUpdateCheck: true, emuUpdateLast: 0,
   backupRoot: '', backupAfterPlay: true, backupWeekly: true, backupKeep: 10, backupLast: 0,
   onLaunch: 'minimize', priority: 'above', ramGuard: true, playtime: true, confirmStop: true, gameMode: true,
   gamepad: true, padLabels: 'xbox', deadzone: 0.35, rumble: true,
@@ -55,6 +56,7 @@ let bios = {};            // console id -> check results
 let inEmu = {};           // console id -> { bios id: version } found inside the emulator's own folder
 let onlineRoots = {};     // 'D:\\' -> true/false
 let running = null;       // { gid, started }
+let emuUp = { ids: [], info: {}, busy: null, pct: 0, phase: '', checked: false }; // emulator updates (see app/emu-updates.js)
 const imgCache = new Map();
 
 function freshState() {
@@ -979,7 +981,32 @@ V.backups = () => {
   </div>`;
 };
 
-V.emulators = () =>`<div class="view"><h1 class="h1">Emulators</h1>
+// ---------------- emulator updates ----------------
+async function checkEmuUpdates(announce) {
+  emuUp.checked = true;
+  if (!emuUp.ids.length) emuUp.ids = await window.ef.emuUpdates.list();
+  const found = [];
+  for (const id of emuUp.ids.filter(id => emuPath(id))) {
+    const r = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); emuUp.info[id] = r;
+    if (r.ok && r.update) found.push(emuFor(id).name);
+  }
+  set().emuUpdateLast = Date.now(); save();
+  if (announce && found.length) toast(`Update ready for <b>${esc(found.join(', '))}</b>. Open Emulators to install it.`, 'ok');
+  if (route.view === 'emulators') render();
+}
+function emuUpdateRow(id) {
+  const u = emuUp.info[id], busy = emuUp.busy === id;
+  const ver = !u ? 'Not checked yet' : u.currentLabel ? `Version ${esc(u.currentLabel)}` : 'Version unknown';
+  const state = !u ? '' : !u.ok ? ` · <span style="color:var(--bad,#ff6b6b)">${esc(u.error)}</span>` : u.update ? ` · Update ready: <b>${esc(u.latest.label)}</b>` : u.latest ? ' · Up to date' : ' · No Windows build found';
+  const btns = busy ? `<span class="small muted" id="eu-${id}">${esc(emuUp.phase)} ${emuUp.pct}%</span>`
+    : `${u && u.ok && u.update ? `<button class="btn sm primary" data-act="emuUpdate" data-arg="${id}" title="Install ${esc(u.latest.label)}" ${emuUp.busy ? 'disabled' : ''}>Update</button>` : ''}`
+    + `${u && u.rollback ? `<button class="btn sm ghost" data-act="emuRollback" data-arg="${id}" title="Put ${esc(u.rollback.label)} back" ${emuUp.busy ? 'disabled' : ''}>Roll back</button>` : ''}`
+    + `<button class="btn sm ghost" data-act="emuUpCheck" ${emuUp.busy ? 'disabled' : ''}>Check now</button>`;
+  return `<div style="padding:6px 0 10px"><div class="small"><b>Updates</b> <span class="muted">${ver}${state}</span></div><div class="row" style="margin-top:8px">${btns}</div></div>`;
+}
+window.ef.emuUpdates.onProgress(v => { if (v.id !== emuUp.busy) return; emuUp.pct = v.pct; emuUp.phase = v.phase; const el = $(`#eu-${v.id}`); if (el) el.textContent = `${v.phase} ${v.pct}%`; });
+
+V.emulators = () => { if (!emuUp.checked) setTimeout(() => checkEmuUpdates(false)); return `<div class="view"><h1 class="h1">Emulators</h1>
   <p class="sub">EchoForge launches standalone emulators. Download them only from the official pages linked here. Fake “PS5 emulator” sites are a common way to spread malware.</p>
   <div class="row" style="margin-bottom:18px"><button class="btn primary" data-act="detect">${ico('scan')} Auto-detect on all drives</button><span class="small muted">Looks in drive roots, Emulators/Games folders, Program Files, Desktop and Downloads.</span></div>
   <div class="grid2">${E.map(e => {
@@ -987,11 +1014,12 @@ V.emulators = () =>`<div class="view"><h1 class="h1">Emulators</h1>
     return `<div class="panel ${p ? 'glow' : ''}"><div class="row"><b style="font:600 20px var(--display);letter-spacing:.04em">${esc(e.name)}</b><span class="pill ${st} plain">${esc(e.status)}</span><span class="grow"></span>${p ? '<span class="pill ok">Linked</span>' : '<span class="pill bad">Not set up</span>'}</div>
       <div class="small muted" style="margin:6px 0 12px">${e.for.map(id => esc(byId(C, id).name)).join(' · ')}${e.note ? ' — ' + esc(e.note) : ''}</div>
       <div class="folder"><span class="p mono" title="${esc(p)}">${p ? esc(p) : '<span class="faint">No program selected</span>'}</span>${p ? driveBadge(p) : ''}</div>
+      ${p && emuUp.ids.includes(e.id) ? emuUpdateRow(e.id) : ''}
       <div class="setrow" style="border:0;padding:6px 0"><div class="lbl"><b>Launch options</b><span>{rom} = game file · {romdir} · {emudir} · {core}</span></div><input class="input mono" style="width:260px" data-emuargs="${e.id}" value="${esc(emuArgs(e.id))}"></div>
       <div class="row"><button class="btn sm primary" data-act="pickEmu" data-arg="${e.id}">${p ? 'Change' : 'Locate'} .exe</button>
         ${p ? `<button class="btn sm" data-act="runEmu" data-arg="${e.id}">Open emulator</button><button class="btn sm ghost" data-act="reveal" data-arg="${esc(p)}">Show folder</button>` : ''}
         <button class="btn sm ghost" data-act="url" data-arg="${esc(e.url)}">${ico('link', 14)} Official page</button>
-        ${S.emulators[e.id] && S.emulators[e.id].args ? `<button class="btn sm ghost" data-act="resetArgs" data-arg="${e.id}">Reset options</button>` : ''}</div></div>`; }).join('')}</div></div>`;
+        ${S.emulators[e.id] && S.emulators[e.id].args ? `<button class="btn sm ghost" data-act="resetArgs" data-arg="${e.id}">Reset options</button>` : ''}</div></div>`; }).join('')}</div></div>`; };
 
 V.firmware = () => `<div class="view"><h1 class="h1">Firmware &amp; BIOS</h1>
   <p class="sub">Some consoles need system files from real hardware. EchoForge never downloads or shares them: dump them from consoles you own. Point each console at a folder and EchoForge checks the files, including checksums where they’re known.</p>
@@ -1018,6 +1046,7 @@ const SETTINGS = [
   { id: 'general', name: 'General', rows: [
     ['startView', 'Open on', 'Which page EchoForge shows when it starts.', 'select', [['home', 'Home'], ['library', 'All Games'], ['last', 'Last page used']]],
     ['launchAtLogin', 'Start with Windows', 'Launch EchoForge when you sign in.', 'toggle'],
+    ['emuUpdateCheck', 'Check for emulator updates', 'Once a day, EchoForge looks for new KytyPS5 and shadPS4 builds on their official GitHub pages and tells you. Nothing installs until you press Update.', 'toggle'],
     ['autoScan', 'Scan libraries on startup', 'Finds new games in your folders every time EchoForge opens.', 'toggle'],
     ['_wizard', 'Setup assistant', 'Walk through emulators, folders and firmware again.', 'button', 'Run setup']
   ] },
@@ -1368,6 +1397,23 @@ const ACT = {
     const name = f.split('\\').pop().toLowerCase();
     if (!e.exe.map(x => x.toLowerCase()).includes(name) && !await confirmBox('Is this the right program?', `Expected <span class="mono">${esc(e.exe.join(' or '))}</span> but you picked <span class="mono">${esc(name)}</span>. Use it anyway?`, 'Use it')) return;
     S.emulators[id] = { ...(S.emulators[id] || {}), path: f }; save(); toast(`${esc(e.name)} linked.`, 'ok'); await checkAllBios(); renderSide(); if ($('#modal .steps')) wizard(wz.step); else render(); },
+  emuUpCheck: async () => { toast('Checking for emulator updates…'); await checkEmuUpdates(false); toast('Emulator updates checked.', 'ok'); },
+  emuUpdate: async (id) => {
+    if (emuUp.busy) return; const name = emuFor(id).name;
+    emuUp.busy = id; emuUp.pct = 0; emuUp.phase = 'Starting'; render();
+    const r = await window.ef.emuUpdates.update({ id, exe: emuPath(id) }); emuUp.busy = null;
+    if (!r.ok) toast(esc(r.error), 'bad');
+    else toast(r.already ? `${esc(name)} is already up to date.` : `${esc(name)} updated to <b>${esc(r.label)}</b>. If it gives you trouble, use Roll back on this page.`, 'ok');
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); render();
+  },
+  emuRollback: async (id) => {
+    const u = emuUp.info[id]; if (emuUp.busy || !u || !u.rollback) return; const name = emuFor(id).name;
+    if (!await confirmBox(`Roll back ${name}?`, `This puts ${esc(u.rollback.label)} back. Settings and saves in its folder stay as they are.`, 'Roll back')) return;
+    emuUp.busy = id; emuUp.phase = 'Rolling back'; emuUp.pct = 0; render();
+    const r = await window.ef.emuUpdates.rollback({ id, exe: emuPath(id) }); emuUp.busy = null;
+    toast(r.ok ? `${esc(name)} is back on <b>${esc(r.label)}</b>.` : esc(r.error), r.ok ? 'ok' : 'bad');
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); render();
+  },
   runEmu: async (id) => { const r = await window.ef.launch({ exe: emuPath(id), args: '', rom: '', gameId: null, onLaunch: 'nothing', priority: 'normal' }); if (!r.ok) toast(esc(r.error), 'bad'); },
   resetArgs: (id) => { delete S.emulators[id].args; save(); render(); },
   detect: async () => { toast('Searching your drives for emulators…'); const found = await window.ef.detect(E.map(e => ({ id: e.id, exe: e.exe, hint: e.hint })));
@@ -1548,5 +1594,6 @@ window.addEventListener('gamepadconnected', (e) => { if (set() && set().gamepad)
   homePath = (await window.ef.paths()).home;
   dlFolder = (await window.ef.downloads.status()).folder || '';
   window.ef.inbox.watch(inboxFolders()); setTimeout(() => refreshInbox(false), 1500);
+  if (set().emuUpdateCheck && Date.now() - (set().emuUpdateLast || 0) > 864e5) setTimeout(() => checkEmuUpdates(true), 30000); // once a day
   setTimeout(checkDownloadsDrive, 4000); setInterval(checkDownloadsDrive, 10 * 60 * 1000); // free space is checked every 10 minutes
 })();

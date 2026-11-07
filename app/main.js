@@ -488,6 +488,7 @@ require('./compat').register({ ipcMain, app, getWin: () => win, x360TitleId });
 require('./backup').register({ ipcMain, app, shell });
 require('./downloads').register({ ipcMain });
 require('./share').register({ ipcMain, getWin: () => win, gameUnit });
+require('./emu-updates').register({ ipcMain, getWin: () => win });
 
 // ---------- firmware / BIOS ----------
 function md5(file) {

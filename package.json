@@ -7,6 +7,7 @@
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node test/emu_updates_test.js",
     "dist": "electron-builder --win nsis",
     "postinstall": "node node_modules/electron/install.js"
   },
