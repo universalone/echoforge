@@ -28,6 +28,7 @@ const I = {
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
   stack: '<rect x="7" y="7" width="14" height="14" rx="2"/><path d="M4 17V5a1 1 0 0 1 1-1h12"/>',
+  book: '<path d="M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4z"/><path d="M20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z"/>',
   save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/>'
 };
 const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
@@ -62,7 +63,7 @@ const imgCache = new Map();
 function freshState() {
   const consoles = {};
   for (const c of C) consoles[c.id] = { enabled: true, emulator: c.emulators[0], folders: [], biosDir: '', manual: {}, core: c.core || '' };
-  return { v: 1, settings: { ...DEFAULTS }, emulators: {}, consoles, games: [], wizardDone: false, lastView: null };
+  return { v: 1, settings: { ...DEFAULTS }, emulators: {}, consoles, games: [], wizardDone: false, tourDone: false, guideCard: true, lastView: null };
 }
 function hydrate(raw) {
   const s = freshState();
@@ -72,6 +73,8 @@ function hydrate(raw) {
   for (const c of C) s.consoles[c.id] = { ...s.consoles[c.id], ...((raw.consoles || {})[c.id] || {}) };
   s.games = Array.isArray(raw.games) ? raw.games : [];
   s.wizardDone = !!raw.wizardDone; s.lastView = raw.lastView || null;
+  s.tourDone = raw.tourDone ?? s.wizardDone; // the tour is for first installs: anyone already set up skips it
+  s.guideCard = raw.guideCard ?? true;
   return s;
 }
 let saveT = null;
@@ -530,7 +533,7 @@ function renderSide() {
         <span class="badge">${h.games || ''}</span><i class="st" style="background:${statusColor(h.status)}" title="${h.ready ? 'Ready' : 'Needs setup'}"></i></button>`;
     }
   }
-  html += `<h6>Forge</h6>` + nav('emulators', 'Emulators', 'emu') + nav('firmware', 'Firmware & BIOS', 'shield') + nav('backups', 'Save backups', 'save') + nav('settings', 'Settings', 'gear');
+  html += `<h6>Forge</h6>` + nav('emulators', 'Emulators', 'emu') + nav('firmware', 'Firmware & BIOS', 'shield') + nav('backups', 'Save backups', 'save') + nav('settings', 'Settings', 'gear') + nav('guide', 'Guide', 'book');
   if (html !== lastSide) { lastSide = html; $('#side').innerHTML = html; } // rebuilding restarts the neon animations: a visible flash
 }
 let lastSide = '', lastMain = '';
@@ -561,8 +564,11 @@ V.home = () => {
       <div class="muted" style="margin-bottom:18px;max-width:520px">${S.games.length ? 'Pick a game below to start your first session.' : 'Point EchoForge at your emulators and game folders — on any drive — and it builds your libraries automatically.'}</div>
       <div class="row"><button class="btn primary lg" data-act="wizard">${ico('wand')} ${S.wizardDone ? 'Run setup again' : 'Start setup'}</button><button class="btn lg ghost" data-act="go" data-arg="pc">See your PC</button></div>
     </section>`;
+  const guideCard = S.guideCard ? `<div class="panel glow guide-card"><div class="grow"><b>New here?</b><div class="small muted">The Guide walks you through everything step by step. Press F1 to open it any time.</div></div>
+      <button class="btn primary" data-act="go" data-arg="guide">${ico('book')} Open the Guide</button><button class="btn ghost" data-act="tour">Take the tour</button><button class="btn ghost" data-act="guideCardClose" title="Hide this card">Close</button></div>` : '';
   return `<div class="view">
     ${heroHTML}
+    ${guideCard}
     <div class="stats">
       <div class="panel stat"><div class="n">${vis.length}</div><div class="l">Games</div></div>
       <div class="panel stat"><div class="n">${readyCount}<span class="faint">/${enabledConsoles().length}</span></div><div class="l">Consoles ready</div></div>
@@ -1220,6 +1226,46 @@ function gameManage(g, c, conf, s) {
     <div class="setrow"><div class="lbl"><b>File</b><span class="mono" style="word-break:break-all">${esc(g.path)}</span></div><div class="row"><button class="btn sm ghost" data-act="reveal" data-arg="${esc(g.path)}">Show file</button><button class="btn sm ghost" data-act="hide" data-arg="${g.id}">${g.hidden ? 'Unhide' : 'Hide'}</button><button class="btn sm danger" data-act="rmGame" data-arg="${g.id}">Remove</button><button class="btn sm danger" data-act="binGame" data-arg="${g.id}">${ico('trash', 14)} Recycle Bin</button></div></div>`;
 }
 
+// ---------------- guide & tour ----------------
+// Content lives in app/guide.js. The tour runs once, after setup on a first install, and any time from the Guide.
+V.guide = () => `<div class="view guide"><h1 class="h1">Guide</h1>
+  <p class="sub">Step-by-step help for everything EchoForge does. Press F1 to come back here any time.</p>
+  <div class="row" style="margin-bottom:16px"><input class="input grow" id="guideQ" placeholder="Search the guide" spellcheck="false" style="max-width:420px" data-nav><button class="btn primary" data-act="tour">${ico('wand')} Take the tour</button></div>
+  <div class="guide-index">${window.EF_GUIDE.map(s => `<button class="chip-link" data-act="guideJump" data-arg="${s.id}">${ico(s.icon, 14)} ${esc(s.title)}</button>`).join('')}</div>
+  ${window.EF_GUIDE.map(s => `<section class="panel guide-sec" id="guide-${s.id}"><div class="h2" style="margin-top:0">${ico(s.icon, 16)} ${esc(s.title)}</div>
+    <p class="muted" style="margin:-4px 0 12px">${esc(s.intro)}</p>
+    <ol class="guide-steps">${s.steps.map(st => `<li data-gtext="${esc(st.text.toLowerCase())}"><span>${esc(st.text)}</span>${st.go ? `<button class="btn sm ghost" data-act="go" data-arg="${esc(st.go)}">Take me there</button>` : st.act ? `<button class="btn sm ghost" data-act="${esc(st.act)}">${esc(st.label || 'Open')}</button>` : ''}</li>`).join('')}</ol>
+    ${(s.tips || []).map(t => `<div class="guide-tip small" data-gtext="${esc(t.toLowerCase())}">${esc(t)}</div>`).join('')}</section>`).join('')}
+  <div class="empty" id="guideNone" hidden><div class="big">Nothing found</div><div>Try another word, like “firmware” or “controller”.</div></div></div>`;
+function filterGuide(q) {
+  q = q.trim().toLowerCase(); let any = false;
+  for (const sec of $$('.guide-sec')) {
+    let hits = 0; const inTitle = !q || sec.querySelector('.h2').textContent.toLowerCase().includes(q);
+    for (const el of $$('[data-gtext]', sec)) { const ok = inTitle || el.dataset.gtext.includes(q); el.hidden = !ok; if (ok) hits++; }
+    sec.hidden = !hits; if (hits) any = true;
+  }
+  const none = $('#guideNone'); if (none) none.hidden = any;
+}
+let tour = null; // { step }
+function startTour() { closeModal(); if (route.view === 'game') go('home'); tour = { step: 0 }; showTour(); }
+function showTour() {
+  let box = $('#tour'); if (!box) { box = document.createElement('div'); box.id = 'tour'; document.body.appendChild(box); }
+  const steps = window.EF_TOUR, st = steps[tour.step], el = st.target && $(st.target);
+  if (el) el.scrollIntoView({ block: 'nearest' });
+  const r = el && el.getBoundingClientRect(), pad = 6;
+  const spot = r ? `<div class="tour-spot" style="left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px"></div>` : '<div class="tour-dim"></div>';
+  // The card sits beside the highlight, kept on screen.
+  let pos = 'left:50%;top:50%;transform:translate(-50%,-50%)';
+  if (r) { const w = 360, left = r.right + 18 + w < innerWidth ? r.right + 18 : Math.max(16, r.left - w - 18); const top = Math.min(Math.max(16, r.top), innerHeight - 230); pos = `left:${left}px;top:${top}px`; }
+  box.innerHTML = `${spot}<div class="tour-card panel" style="${pos}" role="dialog" aria-label="${esc(st.title)}">
+    <div class="small faint">${tour.step + 1} of ${steps.length}</div><h3>${esc(st.title)}</h3><p class="muted">${esc(st.text)}</p>
+    <div class="row"><button class="btn ghost sm" data-act="tourEnd">Skip</button><span class="grow"></span>
+      ${tour.step ? '<button class="btn sm" data-act="tourBack">Back</button>' : ''}<button class="btn primary sm" data-act="tourNext" id="tourNext">${tour.step === steps.length - 1 ? 'Done' : 'Next'}</button></div></div>`;
+  setTimeout(() => { const n = $('#tourNext'); n && n.focus(); }, 20);
+}
+function endTour() { tour = null; const box = $('#tour'); if (box) box.remove(); if (!S.tourDone) { S.tourDone = true; save(); } }
+window.addEventListener('resize', () => { if (tour) showTour(); });
+
 // ---------------- setup wizard ----------------
 let wz = { step: 0 };
 function wizard(step = 0) {
@@ -1426,9 +1472,13 @@ const ACT = {
   recheck: async (cid) => { await checkBios(cid); renderSide(); render(); toast('Checked.', 'ok'); },
   theme: (n) => { set().theme = n; save(); applyLook(); render(); },
   wizard: () => wizard(0), _wizard: () => wizard(0),
-  wzGo: (s) => wizard(+s), wzSkip: () => { S.wizardDone = true; save(); closeModal(); render(); },
+  wzGo: (s) => wizard(+s), wzSkip: () => { S.wizardDone = true; save(); closeModal(); render(); if (!S.tourDone) setTimeout(startTour, 400); },
   wzConsoles: (s) => { $$('[data-wzc]').forEach(cb => { cc(cb.dataset.wzc).enabled = cb.checked; }); save(); renderSide(); wizard(+s); },
-  wzFinish: async () => { S.wizardDone = true; save(); closeModal(); go('home'); await scanAll(false); },
+  wzFinish: async () => { S.wizardDone = true; save(); closeModal(); go('home'); if (!S.tourDone) setTimeout(startTour, 400); await scanAll(false); },
+  tour: () => startTour(), tourNext: () => { if (tour.step >= window.EF_TOUR.length - 1) return endTour(); tour.step++; showTour(); },
+  tourBack: () => { tour.step = Math.max(0, tour.step - 1); showTour(); }, tourEnd: () => endTour(),
+  guideJump: (id) => { const el = $(`#guide-${id}`); if (el) { el.hidden = false; el.scrollIntoView({ block: 'start', behavior: set().motion === 'full' ? 'smooth' : 'auto' }); } },
+  guideCardClose: () => { S.guideCard = false; save(); render(); },
   _rescan: () => scanAll(false),
   _dlBack: async () => {
     const s = set(), prev = s.dlPrevFolder; if (!prev) return;
@@ -1479,6 +1529,7 @@ document.addEventListener('change', async (ev) => {
 });
 document.addEventListener('input', (ev) => {
   const el = ev.target;
+  if (el.id === 'guideQ') return filterGuide(el.value);
   if (el.type === 'range' && el.dataset.set) { set()[el.dataset.set] = +el.value; el.nextElementSibling && (el.nextElementSibling.textContent = el.value); applyLook(); save(); }
   if (el.dataset.sh) { if (el.dataset.sh === 'q') { share.q = el.value; const at = el.selectionStart; render(); const n = $('#shQ'); if (n) { n.focus(); n.setSelectionRange(at, at); } } else { set()[el.dataset.sh] = el.value; share.error = ''; save(); } }
   if (el.id === 'q') { lib.q = el.value; if (route.view !== 'library' && route.view !== 'console') { go('library'); setTimeout(() => { $('#q').focus(); }, 0); } else render(); }
@@ -1508,6 +1559,8 @@ function render() {
 // ---------------- keyboard & controller ----------------
 document.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && ev.key.toLowerCase() === 'f') { ev.preventDefault(); $('#q').focus(); $('#q').select(); }
+  else if (ev.key === 'F1') { ev.preventDefault(); if (tour) endTour(); closeModal(); go('guide'); }
+  else if (ev.key === 'Escape' && tour) endTour();
   else if (ev.key === 'Escape') { if ($('#modal').innerHTML) closeModal(); else if (document.activeElement.id === 'q') { $('#q').value = ''; lib.q = ''; render(); $('#q').blur(); } }
   else if (ev.key === 'F10') { ev.preventDefault(); setBigPicture(!bigpic); }
   else if (ev.key === 'F11') { ev.preventDefault(); window.ef.win.fullscreen(!document.fullscreenElement && !window.__fs); window.__fs = !window.__fs; }
@@ -1553,7 +1606,7 @@ function padLoop() {
   if (edge(8)) setBigPicture(!bigpic);
   const lb = edge(4), rb = edge(5);
   if (lb || rb) {
-    const order = ['home', 'library', 'collections', 'inbox', 'shared', ...enabledConsoles().map(c => 'console:' + c.id), 'emulators', 'firmware', 'backups', 'settings'];
+    const order = ['home', 'library', 'collections', 'inbox', 'shared', ...enabledConsoles().map(c => 'console:' + c.id), 'emulators', 'firmware', 'backups', 'settings', 'guide'];
     const cur = route.view === 'console' ? 'console:' + route.param : route.view; let i = order.indexOf(cur); i = (i + (rb ? 1 : -1) + order.length) % order.length;
     const [v, prm] = order[i].split(':'); go(v, prm || null);
   }

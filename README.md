@@ -43,6 +43,7 @@ This writes `dist\EchoForge-Setup-<version>.exe`, an assisted installer: you cho
 - **Foolproof launching**: every console shows Emulator / Firmware / Games checks. Play is never a dead end: a "needs a quick fix" dialog sends you straight to the fix. Also: low-RAM warning, and a plain-English message when an emulator closes right away.
 - **Firmware & BIOS checker**: per-console folders, MD5 verification (e.g. Xbox MCPX), "installed in emulator" ticks, links to official sources. EchoForge never downloads or copies firmware.
 - **Emulator updates** (`app/emu-updates.js`): KytyPS5 and shadPS4 are checked once a day against their official GitHub releases (Settings → General can turn this off). Only Windows builds with a SHA-256 published by GitHub are used, and shadPS4's daily pre-releases are skipped for its stable releases. **Update** downloads the build, checks the checksum, backs up the files it replaces and copies the new ones over, so settings and saves in the emulator's folder stay. **Roll back** puts the previous version back; the 2 newest backups are kept in `%LOCALAPPDATA%\EchoForge\emulator-backups`. Nothing updates while that emulator is running, and nothing installs until you press Update. Needs 7-Zip.
+- **Guide and tour** (`app/guide.js`): a step-by-step manual on the Guide page (left menu or F1), with search and Take me there buttons that open the right page. A short tour of the screen runs once after setup on a first install, never after updates, and any time from the Guide or the New here? card on Home.
 - **Hardware-aware**: detects GPU/VRAM, CPU threads, RAM and drive types, and recommends emulator settings for this machine. Game mode minimizes the launcher, pauses its effects and raises emulator priority.
 - **Controller navigation** (A/B/X/Y, LB/RB sections), **Big Picture** (F10) and full keyboard support.
 - **Settings**: general, appearance (6 accents, dark/OLED/light, neon effects: breathe, pulse, chase, flicker, color cycle or steady, with adjustable speed, the highlighted game as a blurred full-screen background, cover size and shape, UI scale), library, launching & performance, controller, sound, Big Picture, accessibility, backup/restore.
@@ -51,13 +52,14 @@ This writes `dist\EchoForge-Setup-<version>.exe`, an assisted installer: you cho
 ```
 app/main.js        Electron main: windows, storage, scanning, SFO parsing, firmware checks, hardware probe, launching
 app/emu-updates.js Emulator updates from official GitHub releases: check, verified download, backup, roll back
+app/guide.js       Guide content and the first-run tour steps
 app/preload.js     Safe bridge to the UI
 app/splash.html    Splash screen
 app/index.html     Shell     app/styles.css  Design system     app/renderer.js  UI
 app/data.js        Console + emulator catalog and per-PC tuning rules
 app/assets/        logo.svg, icon.png, icon.ico
 tools/             make_icon.py (icon from the logo), make_test_library.py (fake library for testing), build_shadps4.cmd / build_rpcs3.cmd (build from source), install_emulators.ps1 (Xenia Canary, xemu, DuckStation, Dolphin, PPSSPP from official releases)
-test/              emu_updates_test.js (emulator updates against a fake release feed: npm test)
+test/              guide_test.js (Guide links and tour targets), emu_updates_test.js (emulator updates against a fake release feed): npm test
 docs/RESEARCH.md   Emulator research, firmware table, build toolchains, roadmap
 ```
 

@@ -383,3 +383,20 @@ input[type=range] { accent-color: var(--a2); width: 200px; }
   box-shadow: 0 1px calc(4px + 12px * var(--breath)) color-mix(in srgb, var(--neon) calc(10% + 25% * var(--breath)), transparent); }
 :where([data-glow="on"]) .side { border-right-color: color-mix(in srgb, var(--neon) calc(20% + 40% * var(--breath)), transparent); }
 :where([data-glow="on"]) .chead .glowbar { background: linear-gradient(90deg, var(--neon), var(--h2), transparent); box-shadow: 0 0 calc(4px + 12px * var(--breath)) var(--neon); }
+
+/* Guide & tour */
+.guide-card { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0 0; }
+.guide-index { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+.chip-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line2); background: var(--bg2); color: var(--text); cursor: pointer; font: 600 12px var(--display); letter-spacing: .06em; }
+.chip-link:hover, .chip-link:focus-visible { border-color: var(--a2); }
+.guide-sec { margin-bottom: 14px; scroll-margin-top: 16px; }
+.guide-steps { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 900px; }
+.guide-steps li { line-height: 1.55; }
+.guide-steps li > span { margin-right: 10px; }
+.guide-steps li .btn { vertical-align: middle; }
+.guide-tip { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--a2); background: var(--bg2); color: var(--muted); max-width: 900px; }
+#tour { position: fixed; inset: 0; z-index: 80; }
+.tour-dim { position: fixed; inset: 0; background: rgba(4, 4, 6, .7); }
+.tour-spot { position: fixed; border: 2px solid var(--a2); border-radius: 8px; box-shadow: 0 0 0 9999px rgba(4, 4, 6, .7), 0 0 24px color-mix(in srgb, var(--a2) 60%, transparent); pointer-events: none; transition: all calc(.25s * var(--speed, 1)) ease; }
+.tour-card { position: fixed; width: 360px; max-width: calc(100vw - 32px); background: var(--panel-solid); border-color: var(--line2); }
+.tour-card h3 { margin: 4px 0 6px; font: 600 20px var(--display); letter-spacing: .04em; text-transform: uppercase; }

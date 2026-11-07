@@ -1,13 +1,13 @@
 {
   "name": "echoforge",
   "productName": "EchoForge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "EchoForge - next-gen console emulation launcher",
   "author": "EchoForge contributors",
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/emu_updates_test.js",
+    "test": "node test/guide_test.js && node test/emu_updates_test.js",
     "dist": "electron-builder --win nsis",
     "postinstall": "node node_modules/electron/install.js"
   },
