@@ -106,8 +106,31 @@ const server = http.createServer((req, res) => {
   const s = build('shadps4-win64-sdl-0.21.0.zip', { 'shadPS4.exe': 'stable' }), n = build('shadps4-win64-sdl-2026-11-07-33e7312.zip', { 'shadPS4.exe': 'nightly' });
   feeds['shadps4-emu/shadPS4'] = [rel('Pre-release-shadPS4-2026-11-07-33e7312', [asset(n)], { prerelease: true }), rel('v.0.21.0', [asset(s)])];
   const sdir = path.join(T, 'Programs', 'shadPS4'); write(path.join(sdir, 'shadps4.exe'), 'self built');
-  c = await up.check('shadps4', path.join(sdir, 'shadps4.exe'));
-  check('shadPS4 offers the stable release, not the daily build', c.ok && c.latest.tag === 'v.0.21.0' && c.latest.label === '0.21.0', JSON.stringify(c.latest && c.latest.tag));
+  c = await up.check('shadps4', path.join(sdir, 'shadps4.exe'), 'tested');
+  check('shadPS4 Tested offers the stable release, not the daily build', c.ok && c.latest.tag === 'v.0.21.0' && c.latest.label === '0.21.0', JSON.stringify(c.latest && c.latest.tag));
+  c = await up.check('shadps4', path.join(sdir, 'shadps4.exe'), 'latest');
+  check('shadPS4 Latest offers the daily build', c.ok && c.latest.tag === 'Pre-release-shadPS4-2026-11-07-33e7312', JSON.stringify(c.latest && c.latest.tag));
+
+  // KytyPS5 has no stable releases: Tested means builds out for two days.
+  const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+  const fresh = build('KytyPS5-2026-11-20-4444444-Windows-x64.zip', { 'kyty_emulator.exe': 'fresh' }), settled = build('KytyPS5-2026-11-17-5555555-Windows-x64.zip', { 'kyty_emulator.exe': 'settled' });
+  feeds['KytyPS5/KytyPS5'] = [rel('KytyPS5-2026-11-20-4444444', [asset(fresh)], { published_at: ago(3) }), rel('KytyPS5-2026-11-17-5555555', [asset(settled)], { published_at: ago(72) })];
+  c = await up.check('kytyps5', exe, 'tested');
+  check('Kyty Tested skips builds under two days old', c.ok && c.update && c.latest.tag === 'KytyPS5-2026-11-17-5555555', c.latest && c.latest.tag);
+  c = await up.check('kytyps5', exe, 'latest');
+  check('Kyty Latest offers the newest build', c.ok && c.update && c.latest.tag === 'KytyPS5-2026-11-20-4444444', c.latest && c.latest.tag);
+
+  // Keep this version: shown, never offered or installed.
+  c = await up.check('kytyps5', exe, 'keep');
+  check('Keep shows the newest build but offers no update', c.ok && c.kept && !c.update && c.latest.tag === 'KytyPS5-2026-11-20-4444444');
+  r = await up.update('kytyps5', exe, () => {}, 'keep');
+  check('Keep refuses to update', !r.ok && /keep its version/.test(r.error) && read(exe) === 'exe v6', r.error);
+
+  // Switching from Latest to Tested never installs an older build.
+  r = await up.update('kytyps5', exe, () => {}, 'latest'); check('Latest installs the newest build', r.ok && read(exe) === 'fresh', r.error || '');
+  c = await up.check('kytyps5', exe, 'tested');
+  check('Tested after Latest offers no downgrade', c.ok && !c.update && c.ahead, JSON.stringify({ update: c.update, ahead: c.ahead }));
+  r = await up.update('kytyps5', exe, () => {}, 'tested'); check('Tested update leaves the newer build alone', r.ok && r.already && read(exe) === 'fresh', r.error || '');
 
   // GitHub's list isn't always newest first: the newest by date wins.
   const early = build('KytyPS5-2026-11-13-2222222-Windows-x64.zip', { 'kyty_emulator.exe': 'early' }), late = build('KytyPS5-2026-11-13-3333333-Windows-x64.zip', { 'kyty_emulator.exe': 'late' });

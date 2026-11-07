@@ -58,6 +58,7 @@ let inEmu = {};           // console id -> { bios id: version } found inside the
 let onlineRoots = {};     // 'D:\\' -> true/false
 let running = null;       // { gid, started }
 let emuUp = { ids: [], info: {}, busy: null, pct: 0, phase: '', checked: false }; // emulator updates (see app/emu-updates.js)
+const emuChannel = id => (S.emulators[id] || {}).channel || 'tested'; // Tested unless chosen otherwise on the Emulators page
 const imgCache = new Map();
 
 function freshState() {
@@ -1000,7 +1001,7 @@ async function checkEmuUpdates(announce) {
   if (!emuUp.ids.length) emuUp.ids = await window.ef.emuUpdates.list();
   const found = [];
   for (const id of emuUp.ids.filter(id => emuPath(id))) {
-    const r = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); emuUp.info[id] = r;
+    const r = await window.ef.emuUpdates.check({ id, exe: emuPath(id), channel: emuChannel(id) }); emuUp.info[id] = r;
     if (r.ok && r.update) found.push(emuFor(id).name);
   }
   set().emuUpdateLast = Date.now(); save();
@@ -1010,11 +1011,15 @@ async function checkEmuUpdates(announce) {
 function emuUpdateRow(id) {
   const u = emuUp.info[id], busy = emuUp.busy === id;
   const ver = !u ? 'Not checked yet' : u.currentLabel ? `Version ${esc(u.currentLabel)}` : 'Version unknown';
-  const state = !u ? '' : !u.ok ? ` · <span style="color:var(--bad,#ff6b6b)">${esc(u.error)}</span>` : u.update ? ` · Update ready: <b>${esc(u.latest.label)}</b>` : u.latest ? ' · Up to date' : ' · No Windows build found';
+  const state = !u ? '' : !u.ok ? ` · <span style="color:var(--bad,#ff6b6b)">${esc(u.error)}</span>`
+    : u.kept ? ` · Kept on this version${u.latest && u.latest.tag !== u.current ? ` (newest is ${esc(u.latest.label)})` : ''}`
+    : u.update ? ` · Update ready: <b>${esc(u.latest.label)}</b>` : u.ahead ? ' · Newer than the tested build' : u.latest ? ' · Up to date' : ' · No build ready yet';
+  const ch = emuChannel(id), chans = [['tested', 'Tested'], ['latest', 'Latest'], ['keep', 'Keep this version']];
+  const picker = `<select class="input" style="height:28px;font-size:12px" data-emuchan="${id}" title="Which builds to offer" ${emuUp.busy ? 'disabled' : ''}>${chans.map(([v, l]) => `<option value="${v}" ${ch === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   const btns = busy ? `<span class="small muted" id="eu-${id}">${esc(emuUp.phase)} ${emuUp.pct}%</span>`
     : `${u && u.ok && u.update ? `<button class="btn sm primary" data-act="emuUpdate" data-arg="${id}" title="Install ${esc(u.latest.label)}" ${emuUp.busy ? 'disabled' : ''}>Update</button>` : ''}`
     + `${u && u.rollback ? `<button class="btn sm ghost" data-act="emuRollback" data-arg="${id}" title="Put ${esc(u.rollback.label)} back" ${emuUp.busy ? 'disabled' : ''}>Roll back</button>` : ''}`
-    + `<button class="btn sm ghost" data-act="emuUpCheck" ${emuUp.busy ? 'disabled' : ''}>Check now</button>`;
+    + `<button class="btn sm ghost" data-act="emuUpCheck" ${emuUp.busy ? 'disabled' : ''}>Check now</button>` + picker;
   return `<div style="padding:6px 0 10px"><div class="small"><b>Updates</b> <span class="muted">${ver}${state}</span></div><div class="row" style="margin-top:8px">${btns}</div></div>`;
 }
 window.ef.emuUpdates.onProgress(v => { if (v.id !== emuUp.busy) return; emuUp.pct = v.pct; emuUp.phase = v.phase; const el = $(`#eu-${v.id}`); if (el) el.textContent = `${v.phase} ${v.pct}%`; });
@@ -1062,7 +1067,7 @@ const SETTINGS = [
   { id: 'general', name: 'General', rows: [
     ['startView', 'Open on', 'Which page EchoForge shows when it starts.', 'select', [['home', 'Home'], ['library', 'All Games'], ['last', 'Last page used']]],
     ['launchAtLogin', 'Start with Windows', 'Launch EchoForge when you sign in.', 'toggle'],
-    ['emuUpdateCheck', 'Check for emulator updates', 'Once a day, EchoForge looks for new KytyPS5 and shadPS4 builds on their official GitHub pages and tells you. Nothing installs until you press Update.', 'toggle'],
+    ['emuUpdateCheck', 'Check for emulator updates', 'Once a day, EchoForge looks for new KytyPS5 and shadPS4 builds on their official GitHub pages and tells you, following each emulator’s Tested, Latest or Keep choice on the Emulators page. Nothing installs until you press Update.', 'toggle'],
     ['autoScan', 'Scan libraries on startup', 'Finds new games in your folders every time EchoForge opens.', 'toggle'],
     ['_wizard', 'Setup assistant', 'Walk through emulators, folders and firmware again.', 'button', 'Run setup']
   ] },
@@ -1458,10 +1463,10 @@ const ACT = {
   emuUpdate: async (id) => {
     if (emuUp.busy) return; const name = emuFor(id).name;
     emuUp.busy = id; emuUp.pct = 0; emuUp.phase = 'Starting'; render();
-    const r = await window.ef.emuUpdates.update({ id, exe: emuPath(id) }); emuUp.busy = null;
+    const r = await window.ef.emuUpdates.update({ id, exe: emuPath(id), channel: emuChannel(id) }); emuUp.busy = null;
     if (!r.ok) toast(esc(r.error), 'bad');
     else toast(r.already ? `${esc(name)} is already up to date.` : `${esc(name)} updated to <b>${esc(r.label)}</b>. If it gives you trouble, use Roll back on this page.`, 'ok');
-    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); render();
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id), channel: emuChannel(id) }); render();
   },
   emuRollback: async (id) => {
     const u = emuUp.info[id]; if (emuUp.busy || !u || !u.rollback) return; const name = emuFor(id).name;
@@ -1469,7 +1474,7 @@ const ACT = {
     emuUp.busy = id; emuUp.phase = 'Rolling back'; emuUp.pct = 0; render();
     const r = await window.ef.emuUpdates.rollback({ id, exe: emuPath(id) }); emuUp.busy = null;
     toast(r.ok ? `${esc(name)} is back on <b>${esc(r.label)}</b>.` : esc(r.error), r.ok ? 'ok' : 'bad');
-    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id) }); render();
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id), channel: emuChannel(id) }); render();
   },
   runEmu: async (id) => { const r = await window.ef.launch({ exe: emuPath(id), args: '', rom: '', gameId: null, onLaunch: 'nothing', priority: 'normal' }); if (!r.ok) toast(esc(r.error), 'bad'); },
   resetArgs: (id) => { delete S.emulators[id].args; save(); render(); },
@@ -1515,6 +1520,10 @@ document.addEventListener('click', (ev) => {
 document.addEventListener('dblclick', (ev) => { const el = ev.target.closest('[data-play]'); if (el) { closeModal(); play(el.dataset.play); } });
 document.addEventListener('change', async (ev) => {
   const el = ev.target;
+  if (el.dataset.emuchan) { // Tested / Latest / Keep this version, then look again with that choice
+    const id = el.dataset.emuchan; S.emulators[id] = { ...(S.emulators[id] || {}), channel: el.value }; save();
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id), channel: el.value }); render(); return;
+  }
   if (el.dataset.shtool) { if (el.checked) share.toolPicked.add(el.dataset.shtool); else share.toolPicked.delete(el.dataset.shtool); render(); return; }
   if (el.dataset.shpick) { if (el.checked) share.picked.add(el.dataset.shpick); else share.picked.delete(el.dataset.shpick); render(); return; }
   if (el.dataset.set) {

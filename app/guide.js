@@ -27,6 +27,7 @@ window.EF_GUIDE = [
       { text: 'For anything it didn’t find, press Locate and pick the emulator’s .exe, or Official page to download it from the official site.' },
       { text: 'Launch options control how the emulator opens a game. Leave them as they are unless the emulator’s own guide says otherwise. Reset options puts them back.' },
       { text: 'KytyPS5 and shadPS4 have an Updates line. Press Check now, then Update to install the newest build. EchoForge checks the download, backs up the files it replaces and keeps your settings and saves.' },
+      { text: 'Choose which builds each emulator is offered. Tested: shadPS4’s stable releases, or KytyPS5 builds that have been out for two days. Latest: every new build, as soon as it’s out. Keep this version: no updates, though the newest build is still shown. Switching to Tested never installs an older build.', go: 'emulators' },
       { text: 'If a new build works worse, press Roll back to put the previous version back. Close the emulator first: EchoForge won’t change one that’s running.' },
       { text: 'Xbox One has no emulator to link. Install each game with WinDurango’s steps: copy WinDurango’s files into the game, turn on Developer Mode in Windows Settings, and register the game by running Add-AppxPackage -Register .\\AppxManifest.xml in its folder. Then add the game’s folder to Xbox One and press Play.', go: 'console:xone' }
     ],

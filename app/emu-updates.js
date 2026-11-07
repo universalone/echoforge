@@ -9,7 +9,8 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 
-// Only these emulators update, and only from these repositories. stable: skip GitHub pre-releases (daily builds).
+// Only these emulators update, and only from these repositories. stable: the emulator marks real releases, and its
+// GitHub pre-releases are daily test builds.
 const SOURCES = {
   kytyps5: { repo: 'KytyPS5/KytyPS5', asset: /-Windows-x64\.zip$/i, exe: ['kyty_emulator.exe'] },
   shadps4: { repo: 'shadps4-emu/shadPS4', asset: /^shadps4-win64-.*\.zip$/i, exe: ['shadPS4.exe', 'shadps4.exe'], stable: true }
@@ -17,6 +18,7 @@ const SOURCES = {
 const API = process.env.EF_GH_API || 'https://api.github.com'; // EF_GH_API: test feed (dev aid)
 const SOURCE_FILE = 'ECHOFORGE_SOURCE.txt';
 const KEEP_BACKUPS = 2;
+const TESTED_HOURS = 48; // Tested, for emulators without stable releases: builds out at least this long
 const backupRoot = () => path.join(process.env.EF_EMU_BACKUPS || path.join(process.env.LOCALAPPDATA || os.homedir(), 'EchoForge', 'emulator-backups'));
 const sevenZip = () => ['C:\\Program Files\\7-Zip\\7z.exe', 'C:\\Program Files (x86)\\7-Zip\\7z.exe'].find(p => fs.existsSync(p)) || null;
 
@@ -57,18 +59,29 @@ async function gh(url) {
   return res.json();
 }
 
-// The newest release with a Windows build that has a published checksum.
-async function newest(src) {
+// Every release with a Windows build that has a published checksum, newest first.
+async function builds(src) {
   const list = await gh(`${API}/repos/${src.repo}/releases?per_page=30`);
   list.sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || ''))); // GitHub's order isn't always newest first
+  const out = [];
   for (const r of list) {
-    if (r.draft || (src.stable && r.prerelease)) continue;
+    if (r.draft) continue;
     const a = (r.assets || []).find(x => src.asset.test(x.name));
     if (!a || !/^sha256:[0-9a-f]{64}$/i.test(a.digest || '')) continue;
-    return { tag: r.tag_name, label: label(r.tag_name), date: r.published_at, page: r.html_url, url: a.browser_download_url, name: a.name, size: a.size, sha256: a.digest.slice(7).toLowerCase() };
+    out.push({ tag: r.tag_name, label: label(r.tag_name), date: r.published_at, pre: !!r.prerelease, page: r.html_url, url: a.browser_download_url, name: a.name, size: a.size, sha256: a.digest.slice(7).toLowerCase() });
   }
-  return null;
+  return out;
 }
+// The build a choice points at. Latest: the newest build. Tested: the newest stable release where the emulator marks
+// them, otherwise the newest build that has been out for two days (fixes for a broken build usually follow within hours).
+function pick(all, src, channel) {
+  if (channel === 'latest') return all[0] || null;
+  if (src.stable) return all.find(b => !b.pre) || null;
+  const cutoff = Date.now() - TESTED_HOURS * 3600e3;
+  return all.find(b => Date.parse(b.date) <= cutoff) || null;
+}
+// A build counts as an update only if it's newer than the one installed: switching to Tested never downgrades.
+const isNewer = (all, target, current) => { if (!target || target.tag === current) return false; const c = all.findIndex(b => b.tag === current); return c < 0 || all.indexOf(target) < c; };
 
 const backupsFor = async id => (await fsp.readdir(path.join(backupRoot(), id)).catch(() => [])).sort();
 async function lastBackup(id) {
@@ -77,14 +90,16 @@ async function lastBackup(id) {
   try { return { dir, ...JSON.parse(await fsp.readFile(path.join(dir, 'backup.json'), 'utf8')) }; } catch { return null; }
 }
 
-async function check(id, exe) {
+// channel: 'tested', 'latest' or 'keep' (no updates; the newest build is still shown).
+async function check(id, exe, channel = 'latest') {
   const src = SOURCES[id]; if (!src) return { ok: false, error: 'EchoForge can’t update this emulator.' };
   const dir = folderOf(exe); if (!dir) return { ok: false, error: 'Move the emulator into its own folder first.' };
   const current = await installed(dir), back = await lastBackup(id);
   const rollback = back && back.to === current ? { label: label(back.from) || 'the earlier version' } : null;
   try {
-    const latest = await newest(src);
-    return { ok: true, current, currentLabel: label(current), latest, update: !!latest && latest.tag !== current, rollback };
+    const all = await builds(src), target = pick(all, src, channel === 'keep' ? 'latest' : channel);
+    const c = all.findIndex(b => b.tag === current), ahead = c >= 0 && !!target && c < all.indexOf(target);
+    return { ok: true, channel, current, currentLabel: label(current), latest: target, update: channel !== 'keep' && isNewer(all, target, current), kept: channel === 'keep', ahead, rollback };
   } catch (e) { return { ok: false, error: e.message, current, currentLabel: label(current), rollback }; }
 }
 
@@ -123,20 +138,21 @@ async function restore(dir, back) {
   else await fsp.writeFile(path.join(dir, SOURCE_FILE), back.source);
 }
 
-async function update(id, exe, progress = () => {}) {
+async function update(id, exe, progress = () => {}, channel = 'latest') {
   const src = SOURCES[id]; if (!src) return { ok: false, error: 'EchoForge can’t update this emulator.' };
   const dir = folderOf(exe); if (!dir) return { ok: false, error: 'Move the emulator into its own folder first.' };
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'echoforge-emu-'));
   let back = null;
   try {
     progress(0, 'Checking');
-    const rel = await newest(src); if (!rel) return { ok: false, error: 'No Windows build with a checksum was found.' };
+    if (channel === 'keep') return { ok: false, error: 'This emulator is set to keep its version. Choose Tested or Latest to update it.' };
+    const all = await builds(src), rel = pick(all, src, channel); if (!rel) return { ok: false, error: 'No Windows build with a checksum was found.' };
     const current = await installed(dir);
-    if (rel.tag === current) return { ok: true, already: true, label: rel.label };
+    if (!isNewer(all, rel, current)) return { ok: true, already: true, label: label(current) || rel.label };
     const arc = path.join(work, 'update.zip'); await download(rel, arc, progress);
     progress(82, 'Unpacking'); const stage = path.join(work, 'stage'); await unpack(arc, stage);
     // Some archives wrap everything in one folder: install from wherever the emulator's exe is.
-    const all = await walk(stage), exeRel = all.find(f => src.exe.some(x => path.basename(f).toLowerCase() === x.toLowerCase()));
+    const staged = await walk(stage), exeRel = staged.find(f => src.exe.some(x => path.basename(f).toLowerCase() === x.toLowerCase()));
     if (!exeRel) throw new Error('The update doesn’t contain the emulator program.');
     const root = path.join(stage, path.dirname(exeRel)), files = await walk(root);
     const exes = files.filter(f => /\.exe$/i.test(f)).map(f => path.basename(f).toLowerCase());
@@ -183,9 +199,9 @@ async function rollback(id, exe) {
 function register({ ipcMain, getWin }) {
   const send = (ch, v) => { const w = getWin(); if (w && !w.isDestroyed()) w.webContents.send(ch, v); };
   ipcMain.handle('emuup:list', () => Object.keys(SOURCES));
-  ipcMain.handle('emuup:check', (_e, { id, exe }) => check(id, exe));
-  ipcMain.handle('emuup:update', (_e, { id, exe }) => update(id, exe, (pct, phase) => send('emuup:progress', { id, pct: Math.round(pct), phase })));
+  ipcMain.handle('emuup:check', (_e, { id, exe, channel }) => check(id, exe, channel));
+  ipcMain.handle('emuup:update', (_e, { id, exe, channel }) => update(id, exe, (pct, phase) => send('emuup:progress', { id, pct: Math.round(pct), phase }), channel));
   ipcMain.handle('emuup:rollback', (_e, { id, exe }) => rollback(id, exe));
 }
 
-module.exports = { register, check, update, rollback, label, SOURCES };
+module.exports = { register, check, update, rollback, label, SOURCES, TESTED_HOURS };
