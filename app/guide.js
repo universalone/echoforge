@@ -27,7 +27,8 @@ window.EF_GUIDE = [
       { text: 'For anything it didn’t find, press Locate and pick the emulator’s .exe, or Official page to download it from the official site.' },
       { text: 'Launch options control how the emulator opens a game. Leave them as they are unless the emulator’s own guide says otherwise. Reset options puts them back.' },
       { text: 'KytyPS5 and shadPS4 have an Updates line. Press Check now, then Update to install the newest build. EchoForge checks the download, backs up the files it replaces and keeps your settings and saves.' },
-      { text: 'If a new build works worse, press Roll back to put the previous version back. Close the emulator first: EchoForge won’t change one that’s running.' }
+      { text: 'If a new build works worse, press Roll back to put the previous version back. Close the emulator first: EchoForge won’t change one that’s running.' },
+      { text: 'Xbox One has no emulator to link. Install each game with WinDurango’s steps: copy WinDurango’s files into the game, turn on Developer Mode in Windows Settings, and register the game by running Add-AppxPackage -Register .\\AppxManifest.xml in its folder. Then add the game’s folder to Xbox One and press Play.', go: 'console:xone' }
     ],
     tips: ['EchoForge checks for emulator updates once a day and tells you. Nothing installs until you press Update. Turn this off in Settings → General.'] },
 
@@ -102,9 +103,10 @@ window.EF_GUIDE = [
       { text: 'A game won’t start: EchoForge lists what’s missing and has a button for each fix. Check the console page’s What’s missing? too.' },
       { text: 'The emulator closes right away: EchoForge shows the emulator’s last message. Common causes are missing firmware, the wrong kind of game file or changed launch options. For KytyPS5 or shadPS4, try Roll back or Update.', go: 'emulators' },
       { text: 'Game file not found: the drive is unplugged or the file moved. Plug the drive back in, or remove the game and scan again.' },
-      { text: 'A game is missing its cover: turn on Settings → Library → Download missing box art, or use Change cover on the game’s page.' },
+      { text: 'A game is missing its cover: turn on Settings → Library → Download missing box art, or use Change cover on the game’s page. For PS3 games, also turn on PS3 covers from GameTDB, and for Xbox 360 games, Xbox 360 covers from XboxUnity.', go: 'settings' },
       { text: 'Import says 7-Zip is needed: install 7-Zip from its official site, then press Refresh.', go: 'inbox' },
-      { text: 'Updates say GitHub is limiting requests: wait an hour and press Check now again.' }
+      { text: 'Updates say GitHub is limiting requests: wait an hour and press Check now again.' },
+      { text: 'An Xbox One game needs installing first, or doesn’t start: finish WinDurango’s steps for that game. WinDurango supports only a few games so far.', go: 'console:xone' }
     ] },
 
   { id: 'legal', title: 'Using EchoForge legally', icon: 'shield',

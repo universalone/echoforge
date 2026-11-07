@@ -22,7 +22,7 @@ window.EF_CONSOLES = [
   {
     id: 'xone', name: 'Xbox One', short: 'ONE', dir: 'Xbox One', speed: 'fast', maker: 'Microsoft', group: 'next', year: 2013,
     hue: ['#9fe870', '#1f7a3a'], emulators: ['windurango'],
-    rule: { names: ['appxmanifest.xml'] }, accept: 'any',
+    rule: { names: ['appxmanifest.xml'] }, accept: 'any', launch: 'appx', // games run as installed Windows apps (app/appx.js)
     ram: 8, maturity: 'experimental',
     formats: 'Unpacked game package folder containing AppxManifest.xml (dumped from your console)',
     bios: []
@@ -109,8 +109,8 @@ window.EF_EMULATORS = [
     args: '"{rom}"', url: 'https://github.com/KytyPS5', note: 'Boots a handful of titles. Not playable yet.' },
   { id: 'sharpemu', name: 'SharpEmu', for: ['ps5'], status: 'experimental', exe: ['SharpEmu.exe'], hint: ['sharpemu', 'sharp'],
     args: '"{rom}"', url: 'https://x.com/rpcs3/status/2078143991363571972', note: 'Community-driven since July 2026. The link is RPCS3’s post naming the official repos.' },
-  { id: 'windurango', name: 'WinDurango', for: ['xone'], status: 'experimental', exe: ['WinDurango.exe'], hint: ['durango'],
-    args: '"{rom}"', url: 'https://github.com/WinDurango', note: 'Translation layer with no program to link: its DLLs are copied into each game, which also needs Windows Developer Mode. A few titles launch.' },
+  { id: 'windurango', name: 'WinDurango', for: ['xone'], status: 'experimental', exe: [], hint: ['durango'], nolink: true,
+    args: '"{rom}"', url: 'https://github.com/WinDurango', note: 'Nothing to link: install each game with WinDurango’s steps and EchoForge starts it for you. Needs Windows Developer Mode. A few titles launch.' },
   { id: 'shadps4', name: 'shadPS4', for: ['ps4'], status: 'active', exe: ['shadPS4.exe', 'shadps4.exe'], hint: ['shadps4', 'shad'],
     args: '-g "{rom}"', url: 'https://github.com/shadps4-emu/shadPS4', note: 'The leading PS4 emulator. Needs a Vulkan 1.3 GPU.' },
   { id: 'rpcs3', name: 'RPCS3', for: ['ps3'], status: 'mature', exe: ['rpcs3.exe'], hint: ['rpcs3'],

@@ -37,7 +37,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
   theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
-  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, xboxUnityArt: false,
+  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true,
@@ -202,8 +202,8 @@ function setBigPicture(on) {
 // ---------------- health ----------------
 function health(cid) {
   const c = byId(C, cid), conf = cc(cid), issues = [];
-  const emu = emuFor(conf.emulator);
-  if (!emuPath(conf.emulator)) issues.push({ lvl: 'bad', text: `${emu.name} isn’t set up yet. EchoForge needs to know where its .exe is.`, fix: 'emulators', label: 'Set up emulator' });
+  const emu = emuFor(conf.emulator), noEmu = c.launch === 'appx';
+  if (!noEmu && !emuPath(conf.emulator)) issues.push({ lvl: 'bad', text: `${emu.name} isn’t set up yet. EchoForge needs to know where its .exe is.`, fix: 'emulators', label: 'Set up emulator' });
   if (conf.emulator === 'retroarch' && !conf.core) issues.push({ lvl: 'bad', text: 'Pick which RetroArch core this console uses.', fix: 'console:' + cid, label: 'Choose core' });
   const res = bios[cid] || [];
   const dir = biosDir(cid);
@@ -220,7 +220,7 @@ function health(cid) {
   const games = S.games.filter(g => g.console === cid && !g.hidden).length;
   if (!conf.folders.length) issues.push({ lvl: 'warn', text: 'No game folders added yet.', fix: 'console:' + cid, label: 'Add a folder' });
   const ready = !issues.some(i => i.lvl === 'bad');
-  const emuOk = !!emuPath(conf.emulator);
+  const emuOk = noEmu || !!emuPath(conf.emulator);
   const biosOk = !issues.some(i => i.fix === 'firmware' && i.lvl === 'bad');
   return { issues, ready, games, emuOk, biosOk, status: ready ? (issues.length ? 'warn' : 'ok') : 'bad' };
 }
@@ -286,21 +286,26 @@ async function scanConsole(cid, quiet = false) {
   return added;
 }
 // Box art for games that have neither their own icon nor a cover. Misses are retried after a week.
-let fetchingArt = false;
+let fetchingArt = false, artAgain = false;
 async function fetchMissingArt(force = false) {
-  if (fetchingArt || (!set().autoArt && !force)) return 0;
+  if (fetchingArt) { artAgain = true; return 0; } // asked again mid-run (a cover source was turned on): go round once more
+  if (!set().autoArt && !force) return 0;
   fetchingArt = true; let n = 0;
   for (const g of S.games) {
-    if (g.cover || (g.icon && !g.iconSmall) || g.noArt) continue; // small disc icons (PSP) still look for box art
+    // Small or wide disc icons (PSP, PS3) still look for box art, so every card is a full cover.
+    if (g.cover || (g.icon && !g.iconSmall && g.console !== 'ps3') || g.noArt) continue;
     if (!force && g.artTried && Date.now() - g.artTried < 7 * 864e5) continue;
     const parts = g.path.split(/[\\/]/);
     const base = parts[parts.length - 1].replace(/\.[^.]+$/, '').replace(/\.nkit$/i, '');
-    const r = await window.ef.fetchArt({ id: g.id, console: g.console, names: [base, parts[parts.length - 2], g.title], file: g.path, xboxUnity: set().xboxUnityArt });
+    // A PS3 game is always EBOOT.BIN: its game folder ("Title [BLUS00001]") carries the name.
+    const folder = /^eboot$/i.test(base) ? cleanTitle(g.path, g.console).title : parts[parts.length - 2];
+    const r = await window.ef.fetchArt({ id: g.id, console: g.console, names: [g.title, folder, base], file: g.path, xboxUnity: set().xboxUnityArt, gameTdb: set().gameTdbArt, titleId: g.titleId });
     g.artTried = Date.now();
     if (r && r.ok) { imgCache.delete(r.path); g.cover = r.path; g.artAuto = true; n++; } // same file name may already be cached
   }
   fetchingArt = false;
   if (n) { save(); if (['home', 'library', 'console'].includes(route.view)) render(); }
+  if (artAgain) { artAgain = false; n += await fetchMissingArt(force); }
   return n;
 }
 async function scanAll(quiet = true) {
@@ -338,10 +343,10 @@ async function play(gid) {
     }
   }
   blip('play');
-  const res = await window.ef.launch({
-    exe: emuPath(emuId), args: g.args || emuArgs(emuId), rom: g.path, core: conf.core, gameId: g.id,
-    onLaunch: set().onLaunch, priority: set().priority
-  });
+  const res = c.launch === 'appx'
+    ? await window.ef.launchAppx({ manifest: g.path, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority })
+    : await window.ef.launch({ exe: emuPath(emuId), args: g.args || emuArgs(emuId), rom: g.path, core: conf.core, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority });
+  if (res.needsInstall) { blip('err'); return modal(`<h3>${esc(tt(g))} needs installing first</h3><p class="muted">${esc(res.error)}</p><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="guide">Open the Guide</button></div>`); }
   if (!res.ok) { blip('err'); return modal(`<h3>Couldn’t start the game</h3><div class="issue">${esc(res.error)}</div><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="emulators">Check emulator</button></div>`); }
   running = { gid: g.id, started: Date.now() };
   if (set().gameMode) document.body.classList.add('playing');
@@ -360,6 +365,8 @@ window.ef.onGameExit(({ gameId, seconds, error }) => {
   if (g) { if (set().playtime) g.playtime = (g.playtime || 0) + seconds; g.lastPlayed = Date.now(); save(); }
   if (g && !error && set().backupAfterPlay) backupSaves([g.emu || cc(g.console).emulator], 'after playing ' + g.title, true);
   if (error) {
+    const appxGame = g && byId(C, g.console).launch === 'appx';
+    if (appxGame) return modal(`<h3>The game didn’t start</h3><p class="muted">${esc(error)}</p><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="guide">Open the Guide</button></div>`);
     modal(`<h3>The emulator closed right away</h3><p class="muted">${g ? esc(g.title) : 'The game'} stopped after ${seconds}s.</p>
       <div class="issue"><span class="mono">${esc(error)}</span></div>
       <p class="small muted">Common causes: missing firmware, the wrong file type for this emulator, or launch options that don’t match the emulator version. Open the emulator on its own once to finish its first-time setup.</p>
@@ -664,7 +671,7 @@ V.console = (cid) => {
         <div class="row" style="gap:8px">${c.maturity === 'experimental' ? '<span class="pill info plain">Experimental</span>' : ''}<span class="pill plain">${esc(c.maker)} · ${c.year}</span><span class="pill plain">For your PC: ${esc(tune.rating)}</span></div>
         <h1 class="h1" style="margin-top:10px">${esc(c.name)}</h1>
         <div class="checklist">
-          ${chk(h.emuOk, false, 'Emulator', h.emuOk ? `${esc(emu.name)} linked` : `${esc(emu.name)} not linked`)}
+          ${chk(h.emuOk, false, 'Emulator', c.launch === 'appx' ? 'None needed: games installed with WinDurango start directly' : h.emuOk ? `${esc(emu.name)} linked` : `${esc(emu.name)} not linked`)}
           ${(() => { const miss = h.issues.filter(i => i.fix === 'firmware');
             return chk(!miss.length, h.biosOk, 'Firmware', !c.bios.length ? 'None needed' : !miss.length ? 'All present' : h.biosOk ? 'Optional files missing' : 'Missing files'); })()}
           ${chk(h.games > 0, true, 'Games', h.games ? `${h.games} in library` : 'None found yet')}
@@ -683,8 +690,8 @@ function consoleSetup(c) {
   const conf = cc(c.id);
   return `<div class="grid2" style="grid-template-columns:minmax(300px,1fr) minmax(460px,1.6fr)">
     <div class="panel"><div class="h2" style="margin-top:0">Emulator core</div>
-      <div class="setrow"><div class="lbl"><b>Use this emulator</b><span>Every game in this section launches with it unless a game overrides it.</span></div>
-        <select class="input" data-cfg="${c.id}.emulator">${c.emulators.map(id => `<option value="${id}" ${conf.emulator === id ? 'selected' : ''}>${esc(emuFor(id).name)}${emuPath(id) ? '' : ' (not set up)'}</option>`).join('')}</select></div>
+      ${c.launch === 'appx' ? `<p class="small muted">No emulator to link. Install each game with WinDurango’s steps: copy WinDurango’s files into the game, turn on Developer Mode in Windows Settings and register the game. Then Play starts it. <button class="btn sm ghost" data-act="go" data-arg="guide">Open the Guide</button></p>` : `<div class="setrow"><div class="lbl"><b>Use this emulator</b><span>Every game in this section launches with it unless a game overrides it.</span></div>
+        <select class="input" data-cfg="${c.id}.emulator">${c.emulators.map(id => `<option value="${id}" ${conf.emulator === id ? 'selected' : ''}>${esc(emuFor(id).name)}${emuPath(id) ? '' : ' (not set up)'}</option>`).join('')}</select></div>`}
       ${conf.emulator === 'retroarch' ? `<div class="setrow"><div class="lbl"><b>RetroArch core</b><span>File name without _libretro.dll, e.g. pcsx_rearmed</span></div><input class="input" data-cfg="${c.id}.core" value="${esc(conf.core)}"></div>` : ''}
       <div class="setrow"><div class="lbl"><b>Section enabled</b><span>Hide consoles you don’t use.</span></div><input type="checkbox" class="toggle" data-cfg="${c.id}.enabled" ${conf.enabled ? 'checked' : ''}></div>
       <div class="small muted" style="margin-top:12px">Accepted formats: ${esc(c.formats)}</div>
@@ -1017,6 +1024,9 @@ V.emulators = () => { if (!emuUp.checked) setTimeout(() => checkEmuUpdates(false
   <div class="row" style="margin-bottom:18px"><button class="btn primary" data-act="detect">${ico('scan')} Auto-detect on all drives</button><span class="small muted">Looks in drive roots, Emulators/Games folders, Program Files, Desktop and Downloads.</span></div>
   <div class="grid2">${E.map(e => {
     const p = emuPath(e.id); const st = { experimental: 'info', active: 'ok', mature: 'ok', good: 'ok' }[e.status];
+    if (e.nolink) return `<div class="panel"><div class="row"><b style="font:600 20px var(--display);letter-spacing:.04em">${esc(e.name)}</b><span class="pill ${st} plain">${esc(e.status)}</span><span class="grow"></span><span class="pill plain">Nothing to link</span></div>
+      <div class="small muted" style="margin:6px 0 12px">${e.for.map(id => esc(byId(C, id).name)).join(' · ')} — ${esc(e.note)}</div>
+      <div class="row"><button class="btn sm ghost" data-act="url" data-arg="${esc(e.url)}">${ico('link', 14)} Official page</button><button class="btn sm ghost" data-act="go" data-arg="guide">${ico('book', 14)} How to set it up</button></div></div>`;
     return `<div class="panel ${p ? 'glow' : ''}"><div class="row"><b style="font:600 20px var(--display);letter-spacing:.04em">${esc(e.name)}</b><span class="pill ${st} plain">${esc(e.status)}</span><span class="grow"></span>${p ? '<span class="pill ok">Linked</span>' : '<span class="pill bad">Not set up</span>'}</div>
       <div class="small muted" style="margin:6px 0 12px">${e.for.map(id => esc(byId(C, id).name)).join(' · ')}${e.note ? ' — ' + esc(e.note) : ''}</div>
       <div class="folder"><span class="p mono" title="${esc(p)}">${p ? esc(p) : '<span class="faint">No program selected</span>'}</span>${p ? driveBadge(p) : ''}</div>
@@ -1080,6 +1090,7 @@ const SETTINGS = [
     ['useRomDirs', 'Standard console folders', 'Creates a folder per console under the ROM library root and adds it to that console’s library.', 'button', 'Create & add folders'],
     ['autoArt', 'Download missing box art', 'Covers come from the libretro thumbnails library (the one RetroArch uses), Only console and game names are sent.', 'toggle'],
     ['xboxUnityArt', 'Xbox 360 covers from XboxUnity', 'A community cover database, used when libretro has no cover. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
+    ['gameTdbArt', 'PS3 covers from GameTDB', 'A community cover database with box art for most PS3 games, used in place of the small disc icon. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['compatCheck', 'Check which games run', 'Looks up PS3 games on RPCS3’s compatibility list and Xbox 360 games on Xenia Canary’s. Only the game’s disc ID is sent. Refreshed weekly.', 'toggle'],
     ['compatBadges', 'Show “will it run?” badges on covers', 'The game’s details always show it.', 'toggle'],
     ['scanDepth', 'Folder scan depth', 'How many subfolders deep to look. PS3/PS4 folders need at least 4.', 'range', [2, 10, 1]],
@@ -1221,8 +1232,8 @@ function gameManage(g, c, conf, s) {
     <div class="setrow"><div class="lbl"><b>Cover</b><span>${g.cover ? (g.artAuto ? 'Found online.' : 'Your own picture.') : g.icon ? 'The game’s own icon.' : 'None yet.'}</span></div><div class="row"><button class="btn sm" data-act="pickCover" data-arg="${g.id}">Change cover</button>${g.cover ? `<button class="btn sm ghost" data-act="resetCover" data-arg="${g.id}">Reset</button>` : `<button class="btn sm ghost" data-act="findArt" data-arg="${g.id}">Find cover online</button>`}</div></div>
     <div class="setrow"><div class="lbl"><b>Collection</b><span>${g.series === '-' ? 'Kept out of collections.' : s ? `In ${esc(s.name)} (${s.games.length} games)${g.series ? '' : ', found automatically'}.` : 'Not in a collection.'} Type a name to move it, “-” to keep it out, or clear it to go back to automatic.</span></div>
       <input class="input" style="width:220px" list="seriesNames" data-gseries="${g.id}" value="${esc(g.series || '')}" placeholder="${esc(s && !g.series ? s.name : 'Automatic')}"><datalist id="seriesNames">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist></div>
-    <div class="setrow"><div class="lbl"><b>Emulator for this game</b></div><select class="input" data-gemu="${g.id}"><option value="">Section default (${esc(emuFor(conf.emulator).name)})</option>${c.emulators.map(id => `<option value="${id}" ${g.emu === id ? 'selected' : ''}>${esc(emuFor(id).name)}</option>`).join('')}</select></div>
-    <div class="setrow"><div class="lbl"><b>Launch options for this game</b><span>Leave empty to use the emulator’s options.</span></div><input class="input mono" style="width:220px" data-gargs="${g.id}" value="${esc(g.args || '')}" placeholder="${esc(emuArgs(g.emu || conf.emulator))}"></div>
+    ${c.launch === 'appx' ? '' : `<div class="setrow"><div class="lbl"><b>Emulator for this game</b></div><select class="input" data-gemu="${g.id}"><option value="">Section default (${esc(emuFor(conf.emulator).name)})</option>${c.emulators.map(id => `<option value="${id}" ${g.emu === id ? 'selected' : ''}>${esc(emuFor(id).name)}</option>`).join('')}</select></div>
+    <div class="setrow"><div class="lbl"><b>Launch options for this game</b><span>Leave empty to use the emulator’s options.</span></div><input class="input mono" style="width:220px" data-gargs="${g.id}" value="${esc(g.args || '')}" placeholder="${esc(emuArgs(g.emu || conf.emulator))}"></div>`}
     <div class="setrow"><div class="lbl"><b>File</b><span class="mono" style="word-break:break-all">${esc(g.path)}</span></div><div class="row"><button class="btn sm ghost" data-act="reveal" data-arg="${esc(g.path)}">Show file</button><button class="btn sm ghost" data-act="hide" data-arg="${g.id}">${g.hidden ? 'Unhide' : 'Hide'}</button><button class="btn sm danger" data-act="rmGame" data-arg="${g.id}">Remove</button><button class="btn sm danger" data-act="binGame" data-arg="${g.id}">${ico('trash', 14)} Recycle Bin</button></div></div>`;
 }
 
@@ -1278,7 +1289,7 @@ function wizard(step = 0) {
   if (step === 1) body = `<h3>Which consoles do you play?</h3><p class="muted">Unchecked consoles are hidden. Turn them back on any time.</p>
     <div class="pick">${C.map(c => `<label><input type="checkbox" data-wzc="${c.id}" ${cc(c.id).enabled ? 'checked' : ''}> <span>${esc(c.name)}</span></label>`).join('')}</div>${nav(true, 'wzConsoles')}`;
   if (step === 2) {
-    const need = [...new Set(enabledConsoles().flatMap(c => c.emulators))].map(emuFor);
+    const need = [...new Set(enabledConsoles().flatMap(c => c.emulators))].map(emuFor).filter(e => !e.nolink);
     body = `<h3>Link your emulators</h3><p class="muted">Try auto-detect first. For anything not found, use “Locate” to pick its .exe, or “Get it” to open the official download page.</p>
       <div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="detect">${ico('scan')} Auto-detect</button></div>
       ${need.map(e => `<div class="folder"><b style="width:120px">${esc(e.name)}</b><span class="p mono small">${emuPath(e.id) ? esc(emuPath(e.id)) : '<span class="faint">not linked</span>'}</span>${emuPath(e.id) ? '<span class="pill ok">OK</span>' : ''}<button class="btn sm" data-act="pickEmu" data-arg="${e.id}">Locate</button><button class="btn sm ghost" data-act="url" data-arg="${esc(e.url)}">Get it</button></div>`).join('')}${nav(true, 'wzGo')}`;
@@ -1512,6 +1523,8 @@ document.addEventListener('change', async (ev) => {
     if (k === 'launchAtLogin') window.ef.setLoginItem(v);
     if (k === 'disableGpu') toast('Restart EchoForge to apply.');
     if (k === 'inboxFolder') { window.ef.inbox.watch(inboxFolders()); refreshInbox(); }
+    // A new cover source was turned on: look again now for the games it covers, rather than waiting a week.
+    if ((k === 'gameTdbArt' || k === 'xboxUnityArt') && v) { const cid = k === 'gameTdbArt' ? 'ps3' : 'x360'; for (const g of S.games) if (g.console === cid && !g.cover) g.artTried = 0; fetchMissingArt(); }
     if (['dlAutoSwitch', 'dlTarget', 'dlSwitchAtGB'].includes(k)) { set().dlWarned = ''; checkDownloadsDrive(); }
     if (['sort', 'hideOffline', 'showHidden', 'titles', 'compact'].includes(k) || route.view === 'settings') render();
   }

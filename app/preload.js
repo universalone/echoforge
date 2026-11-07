@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('ef', {
   probe: invoke('hw:probe'),
   freeRam: invoke('hw:freeRam'),
   launch: invoke('emu:launch'),
+  launchAppx: invoke('appx:launch'),
   stop: invoke('emu:stop'),
   runningGame: invoke('emu:running'),
   detect: invoke('emu:detect'),

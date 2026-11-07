@@ -99,6 +99,12 @@ async function isoFind(sec, dirLba, dirSize, want) {
   return null;
 }
 
+// Xbox 360 game discs carry MICROSOFT*XBOX*MEDIA at the game partition: XGD2 at 0xFDA0000, XGD3 at 0x2090000.
+async function x360(read, total) {
+  if (total < 7e9) return null;
+  for (const off of [0xFDA0000, 0x2090000]) { const x = await read(off, 20); if (x.toString('latin1') === 'MICROSOFT*XBOX*MEDIA') return { console: 'x360', why: 'Xbox 360 disc' }; }
+  return null;
+}
 // What console a disc image is for. read(off, len) reads the image; total is its size in bytes.
 async function classifyDisc(read, name, total, isCD) {
   const ext = path.extname(name).toLowerCase();
@@ -127,10 +133,11 @@ async function classifyDisc(read, name, total, isCD) {
     const txt = cnf ? (await sec(cnf.lba)).toString('latin1', 0, Math.min(cnf.size, 2048)) : '';
     if (/BOOT2/i.test(txt) || (sys.startsWith('PLAYSTATION') && !txt && total > 700 * 2 ** 20)) return { console: 'ps2', why: 'PlayStation 2 disc' };
     if (/BOOT/i.test(txt) || sys.startsWith('PLAYSTATION')) return { console: 'ps1', why: 'PlayStation disc' };
-    if (await isoFind(sec, pvd.readUInt32LE(158), pvd.readUInt32LE(166), 'VIDEO_TS')) return { console: '?', why: 'DVD video (a movie or bonus disc), not a game' };
+    // Full Xbox 360 disc images start with a small DVD-video section ("put this disc in an Xbox 360"): look for the game first.
+    if (await isoFind(sec, pvd.readUInt32LE(158), pvd.readUInt32LE(166), 'VIDEO_TS')) return (await x360(read, total)) || { console: '?', why: 'DVD video (a movie or bonus disc), not a game' };
   }
   if (!isCso) { const x = await read(0x10000, 20); if (x.toString('latin1') === 'MICROSOFT*XBOX*MEDIA') return { console: 'xbox', why: 'Xbox disc (XISO)' }; }
-  if (total >= 7e9) for (const off of [0xFDA0000, 0x2090000]) { const x = await read(off, 20); if (x.toString('latin1') === 'MICROSOFT*XBOX*MEDIA') return { console: 'x360', why: 'Xbox 360 disc' }; }
+  const game360 = await x360(read, total); if (game360) return game360;
   if (ext === '.cso') return { console: 'psp', why: 'Compressed PSP image' };
   return { console: '?', why: 'Not a disc format EchoForge knows' };
 }
@@ -385,4 +392,4 @@ function register({ ipcMain, shell, getWin }) {
   });
 }
 
-module.exports = { register, scan };
+module.exports = { register, scan, classifyDisc };

@@ -7,6 +7,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { tally, binProblem, recycleAll } = require('./recycle');
+const appx = require('./appx');
 
 const DATA_FILE = () => path.join(app.getPath('userData'), 'echoforge-data.json');
 const ICON = path.join(__dirname, 'assets', 'icon.png');
@@ -329,11 +330,26 @@ async function xboxUnityCover(titleId) {
   return pic.toPNG();
 }
 
-ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnity }) => {
+// PS3: libretro has box art for only a few dozen PS3 games, so GameTDB (a community cover database) is asked first,
+// by the disc's title ID. Its covers are JPEGs: they're converted to PNG like every other cover.
+const GAMETDB_REGIONS = { U: 'US', E: 'EN', J: 'JA', P: 'JA', A: 'US', K: 'KO' };
+async function gameTdbCover(titleId) {
+  if (!/^[A-Z]{4}\d{5}$/.test(titleId || '')) return null;
+  for (const region of [...new Set([GAMETDB_REGIONS[titleId[3]] || 'US', 'US', 'EN'])]) {
+    const res = await fetch(`https://art.gametdb.com/ps3/coverM/${region}/${titleId}.jpg`, { headers: { 'User-Agent': 'EchoForge' } });
+    if (!res.ok) continue;
+    const pic = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    if (!pic.isEmpty()) return pic.toPNG();
+  }
+  return null;
+}
+
+ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnity, gameTdb, titleId }) => {
   const sys = ART_SYSTEMS[cid]; if (!sys) return { ok: false, reason: 'unsupported' };
   try {
     let buf = null, name = null;
-    const hit = pickArt(await artList(sys), (names || []).filter(Boolean));
+    if (gameTdb && cid === 'ps3') { buf = await gameTdbCover(titleId); if (buf) name = 'GameTDB ' + titleId; }
+    const hit = !buf && pickArt(await artList(sys), (names || []).filter(Boolean));
     if (hit) {
       const res = await fetch(ART_BASE + encodeURIComponent(sys) + '/Named_Boxarts/' + encodeURIComponent(hit), { headers: { 'User-Agent': 'EchoForge' } });
       if (res.ok) { buf = Buffer.from(await res.arrayBuffer()); name = hit; }
@@ -611,8 +627,39 @@ ipcMain.handle('emu:launch', async (_e, req) => {
   else if (req.onLaunch === 'hide') win.hide();
   return { ok: true, args };
 });
+// Xbox One through WinDurango: start the registered game app, then watch its process for the exit (see app/appx.js).
+ipcMain.handle('appx:launch', async (_e, req) => {
+  if (running) return { ok: false, error: 'A game is already running. Close it first.' };
+  let m; try { m = await appx.readManifest(req.manifest); } catch { return { ok: false, error: 'The game file is missing. Is its drive plugged in?' }; }
+  if (!m.name || !m.appId) return { ok: false, error: 'This game’s AppxManifest.xml doesn’t name the game or its app.' };
+  const pkg = await appx.findPackage(m.name);
+  if (!pkg) return { ok: false, needsInstall: true, error: appx.notRegistered(m.title) };
+  try { await appx.start(pkg, m.appId); } catch (err) { return { ok: false, error: String(err.message || err) }; }
+  const started = Date.now(), gameId = req.gameId;
+  running = { child: null, gameId, started, pid: null };
+  const finish = (error) => { if (!running || running.gameId !== gameId) return; clearInterval(running.timer); running = null; win.webContents.send('game:exit', { gameId, seconds: Math.round((Date.now() - started) / 1000), code: error ? 1 : 0, error }); restoreWindow(); };
+  // Wait up to a minute for the game to appear, then check every few seconds that it's still running.
+  running.timer = setInterval(async () => {
+    if (!running || running.gameId !== gameId) return;
+    const pid = await appx.findProcess(pkg, m.exe);
+    if (pid && !running.pid) {
+      running.pid = pid;
+      if (req.priority && req.priority !== 'normal') { const map = { above: os.constants.priority.PRIORITY_ABOVE_NORMAL, high: os.constants.priority.PRIORITY_HIGH }; try { os.setPriority(pid, map[req.priority]); } catch {} }
+    }
+    if (!pid && running.pid) finish(null);
+    else if (!pid && Date.now() - started > 60000) finish('The game didn’t start. WinDurango supports only a few games so far, and each one needs its patch files in place.');
+  }, 3000);
+  if (req.onLaunch === 'minimize') win.minimize();
+  else if (req.onLaunch === 'hide') win.hide();
+  return { ok: true };
+});
 function restoreWindow() { if (!win) return; if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); }
-ipcMain.handle('emu:stop', () => { if (running) { try { running.child.kill(); } catch {} return true; } return false; });
+ipcMain.handle('emu:stop', () => {
+  if (!running) return false;
+  if (running.child) { try { running.child.kill(); } catch {} }
+  else if (running.pid) { try { process.kill(running.pid); } catch {} }
+  return true;
+});
 ipcMain.handle('emu:running', () => (running ? { gameId: running.gameId, started: running.started } : null));
 
 // Looks for known emulator executables in the usual places on every drive.
