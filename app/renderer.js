@@ -41,7 +41,7 @@ const DEFAULTS = {
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true,
-  emuUpdateCheck: true, emuUpdateLast: 0,
+  emuUpdateCheck: true, emuUpdateLast: 0, appUpdateCheck: true, appUpdateLast: 0, appUpdateLater: '',
   backupRoot: '', backupAfterPlay: true, backupWeekly: true, backupKeep: 10, backupLast: 0,
   onLaunch: 'minimize', priority: 'above', ramGuard: true, playtime: true, confirmStop: true, gameMode: true,
   gamepad: true, padLabels: 'xbox', deadzone: 0.35, rumble: true,
@@ -58,6 +58,7 @@ let inEmu = {};           // console id -> { bios id: version } found inside the
 let onlineRoots = {};     // 'D:\\' -> true/false
 let running = null;       // { gid, started }
 let emuUp = { ids: [], info: {}, busy: null, pct: 0, phase: '', checked: false }; // emulator updates (see app/emu-updates.js)
+let appUp = { info: null, busy: false, pct: 0 }; // EchoForge's own updates (see app/app-updates.js)
 const emuChannel = id => (S.emulators[id] || {}).channel || 'tested'; // Tested unless chosen otherwise on the Emulators page
 const imgCache = new Map();
 
@@ -572,10 +573,13 @@ V.home = () => {
       <div class="muted" style="margin-bottom:18px;max-width:520px">${S.games.length ? 'Pick a game below to start your first session.' : 'Point EchoForge at your emulators and game folders — on any drive — and it builds your libraries automatically.'}</div>
       <div class="row"><button class="btn primary lg" data-act="wizard">${ico('wand')} ${S.wizardDone ? 'Run setup again' : 'Start setup'}</button><button class="btn lg ghost" data-act="go" data-arg="pc">See your PC</button></div>
     </section>`;
+  const au = appUp.info, appCard = au && au.ok && au.update && set().appUpdateLater !== au.latest.version ? `<div class="panel glow guide-card"><div class="grow"><b>EchoForge ${esc(au.latest.version)} is ready</b><div class="small muted">You have ${esc(appVersion)}. Updating keeps your library and settings.</div></div>
+      <button class="btn primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : 'Update now'}</button><button class="btn ghost" data-act="url" data-arg="${esc(au.latest.page)}">What’s new</button><button class="btn ghost" data-act="appUpLater">Later</button></div>` : '';
   const guideCard = S.guideCard ? `<div class="panel glow guide-card"><div class="grow"><b>New here?</b><div class="small muted">The Guide walks you through everything step by step. Press F1 to open it any time.</div></div>
       <button class="btn primary" data-act="go" data-arg="guide">${ico('book')} Open the Guide</button><button class="btn ghost" data-act="tour">Take the tour</button><button class="btn ghost" data-act="guideCardClose" title="Hide this card">Close</button></div>` : '';
   return `<div class="view">
     ${heroHTML}
+    ${appCard}
     ${guideCard}
     <div class="stats">
       <div class="panel stat"><div class="n">${vis.length}</div><div class="l">Games</div></div>
@@ -995,6 +999,22 @@ V.backups = () => {
   </div>`;
 };
 
+// ---------------- EchoForge updates ----------------
+async function checkAppUpdate(announce) {
+  const r = await window.ef.appUpdates.check(); appUp.info = r;
+  set().appUpdateLast = Date.now(); save();
+  if (announce && r.ok && r.update && set().appUpdateLater !== r.latest.version) toast(`EchoForge <b>${esc(r.latest.version)}</b> is ready. Update from Home or Settings → About.`, 'ok');
+  if (['home', 'settings'].includes(route.view)) render();
+  return r;
+}
+function appUpdateText() {
+  const u = appUp.info;
+  if (!u) return 'Not checked yet';
+  if (!u.ok) return esc(u.error);
+  return u.update ? `Version ${esc(u.latest.version)} is ready` : `You have the latest version (${esc(appVersion)})`;
+}
+window.ef.appUpdates.onProgress(v => { appUp.pct = v.pct; if (['home', 'settings'].includes(route.view)) render(); });
+
 // ---------------- emulator updates ----------------
 async function checkEmuUpdates(announce) {
   emuUp.checked = true;
@@ -1067,6 +1087,7 @@ const SETTINGS = [
   { id: 'general', name: 'General', rows: [
     ['startView', 'Open on', 'Which page EchoForge shows when it starts.', 'select', [['home', 'Home'], ['library', 'All Games'], ['last', 'Last page used']]],
     ['launchAtLogin', 'Start with Windows', 'Launch EchoForge when you sign in.', 'toggle'],
+    ['appUpdateCheck', 'Check for EchoForge updates', 'Once a day, EchoForge looks for a new version on its GitHub Releases page and tells you. Nothing installs until you press Update.', 'toggle'],
     ['emuUpdateCheck', 'Check for emulator updates', 'Once a day, EchoForge looks for new KytyPS5 and shadPS4 builds on their official GitHub pages and tells you, following each emulator’s Tested, Latest or Keep choice on the Emulators page. Nothing installs until you press Update.', 'toggle'],
     ['autoScan', 'Scan libraries on startup', 'Finds new games in your folders every time EchoForge opens.', 'toggle'],
     ['_wizard', 'Setup assistant', 'Walk through emulators, folders and firmware again.', 'button', 'Run setup']
@@ -1165,7 +1186,8 @@ V.settings = () => {
   };
   const about = `<div class="panel" style="display:flex;gap:24px;align-items:center"><img src="assets/logo.svg" width="110" alt=""><div><div class="wordmark" style="font-size:26px">ECHO<b>FORGE</b></div><div class="muted">Version ${esc(appVersion)} · open-source launcher for next-gen console emulation</div>
     <p class="small muted">EchoForge doesn’t include games, firmware or BIOS files. Use content you own. Emulators are separate projects under their own licenses.</p>
-    <div class="row"><button class="btn sm" data-act="openData">Open data folder</button></div></div></div>`;
+    <div class="small" style="margin:10px 0"><b>Updates</b> <span class="muted">${appUpdateText()}</span></div>
+    <div class="row">${appUp.info && appUp.info.ok && appUp.info.update ? `<button class="btn sm primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : `Update to ${esc(appUp.info.latest.version)}`}</button>` : ''}<button class="btn sm" data-act="appUpCheck" ${appUp.busy ? 'disabled' : ''}>Check for updates</button><button class="btn sm" data-act="openData">Open data folder</button></div></div></div>`;
   return `<div class="view"><h1 class="h1">Settings</h1><p class="sub">Every change saves instantly.</p>
     <div class="setwrap"><div class="setnav">${SETTINGS.map(x => `<button class="${x.id === setTab ? 'on' : ''}" data-act="stab" data-arg="${x.id}">${esc(x.name)}</button>`).join('')}</div>
     <div class="panel">${setTab === 'about' ? about : sec.rows.map(r => { const help = r[0] === '_dlBack' ? dlHelp() : r[2]; return `<div class="setrow"><div class="lbl"><b>${esc(r[1])}</b>${help ? `<span>${esc(help)}</span>` : ''}</div>${ctl(r)}</div>`; }).join('')}</div></div></div>`;
@@ -1459,6 +1481,17 @@ const ACT = {
     const name = f.split('\\').pop().toLowerCase();
     if (!e.exe.map(x => x.toLowerCase()).includes(name) && !await confirmBox('Is this the right program?', `Expected <span class="mono">${esc(e.exe.join(' or '))}</span> but you picked <span class="mono">${esc(name)}</span>. Use it anyway?`, 'Use it')) return;
     S.emulators[id] = { ...(S.emulators[id] || {}), path: f }; save(); toast(`${esc(e.name)} linked.`, 'ok'); await checkAllBios(); renderSide(); if ($('#modal .steps')) wizard(wz.step); else render(); },
+  appUpCheck: async () => { toast('Checking for EchoForge updates…'); const r = await checkAppUpdate(false); toast(!r.ok ? esc(r.error) : r.update ? `EchoForge <b>${esc(r.latest.version)}</b> is ready.` : 'EchoForge is up to date.', r.ok ? 'ok' : 'bad'); },
+  appUpdate: async () => {
+    const u = appUp.info; if (appUp.busy || !u || !u.ok || !u.update) return;
+    if (running) return toast('Close your game first.', 'bad');
+    if (!await confirmBox(`Update to EchoForge ${u.latest.version}?`, 'EchoForge downloads the installer from GitHub, checks it, then closes and opens the installer. Your library, settings and saves are kept.', 'Update')) return;
+    appUp.busy = true; appUp.pct = 0; render();
+    const r = await window.ef.appUpdates.install();
+    if (!r.ok) { appUp.busy = false; toast(esc(r.error), 'bad'); render(); }
+    else toast(`Opening the EchoForge ${esc(r.version)} installer…`, 'ok');
+  },
+  appUpLater: () => { if (appUp.info && appUp.info.latest) { set().appUpdateLater = appUp.info.latest.version; save(); render(); } },
   emuUpCheck: async () => { toast('Checking for emulator updates…'); await checkEmuUpdates(false); toast('Emulator updates checked.', 'ok'); },
   emuUpdate: async (id) => {
     if (emuUp.busy) return; const name = emuFor(id).name;
@@ -1669,6 +1702,7 @@ window.addEventListener('gamepadconnected', (e) => { if (set() && set().gamepad)
   homePath = (await window.ef.paths()).home;
   dlFolder = (await window.ef.downloads.status()).folder || '';
   window.ef.inbox.watch(inboxFolders()); setTimeout(() => refreshInbox(false), 1500);
+  if (set().appUpdateCheck && Date.now() - (set().appUpdateLast || 0) > 864e5) setTimeout(() => checkAppUpdate(true), 20000); // once a day
   if (set().emuUpdateCheck && Date.now() - (set().emuUpdateLast || 0) > 864e5) setTimeout(() => checkEmuUpdates(true), 30000); // once a day
   setTimeout(checkDownloadsDrive, 4000); setInterval(checkDownloadsDrive, 10 * 60 * 1000); // free space is checked every 10 minutes
 })();

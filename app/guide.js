@@ -8,7 +8,7 @@ window.EF_GUIDE = [
       { text: 'Look at Your PC to see your graphics card, memory and drives, and how well your PC handles each console.', go: 'pc' },
       { text: 'Open a console from the menu on the left. Its dot turns green when it’s ready to play. If it isn’t, press What’s missing? on that console’s page.' }
     ],
-    tips: ['You can run setup again any time from Settings → General → Setup assistant.'] },
+    tips: ['You can run setup again any time from Settings → General → Setup assistant.', 'EchoForge checks for new versions of itself once a day. When one is ready, Home shows Update now, or use Settings → About → Check for updates. Your library and settings are kept.'] },
 
   { id: 'games', title: 'Adding your games', icon: 'folder',
     intro: 'Tell EchoForge where each console’s games are. They can be on any drive.',

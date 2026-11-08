@@ -505,6 +505,7 @@ require('./backup').register({ ipcMain, app, shell });
 require('./downloads').register({ ipcMain });
 require('./share').register({ ipcMain, getWin: () => win, gameUnit });
 require('./emu-updates').register({ ipcMain, getWin: () => win });
+require('./app-updates').register({ ipcMain, app, getWin: () => win, isPlaying: () => !!running });
 
 // ---------- firmware / BIOS ----------
 function md5(file) {

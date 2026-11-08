@@ -45,6 +45,11 @@ contextBridge.exposeInMainWorld('ef', {
     onProgress: (fn) => ipcRenderer.on('inbox:progress', (_e, v) => fn(v))
   },
   downloads: { status: invoke('downloads:status'), check: invoke('downloads:check'), set: invoke('downloads:set') },
+  appUpdates: {
+    check: invoke('appup:check'),
+    install: invoke('appup:install'),
+    onProgress: (fn) => ipcRenderer.on('appup:progress', (_e, v) => fn(v))
+  },
   emuUpdates: {
     list: invoke('emuup:list'),
     check: invoke('emuup:check'),
