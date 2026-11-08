@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('ef', {
     onProgress: (fn) => ipcRenderer.on('inbox:progress', (_e, v) => fn(v))
   },
   downloads: { status: invoke('downloads:status'), check: invoke('downloads:check'), set: invoke('downloads:set') },
+  pads: { status: invoke('pads:status'), setup: invoke('pads:setup') },
   appUpdates: {
     check: invoke('appup:check'),
     install: invoke('appup:install'),

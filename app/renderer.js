@@ -40,7 +40,7 @@ const DEFAULTS = {
   sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
-  dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true,
+  dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
   emuUpdateCheck: true, emuUpdateLast: 0, appUpdateCheck: true, appUpdateLast: 0, appUpdateLater: '',
   backupRoot: '', backupAfterPlay: true, backupWeekly: true, backupKeep: 10, backupLast: 0,
   onLaunch: 'minimize', priority: 'above', ramGuard: true, playtime: true, confirmStop: true, gameMode: true,
@@ -54,6 +54,7 @@ let hw = { drives: [] };  // hardware probe
 let route = { view: 'home', param: null };
 let lib = { console: 'all', fav: false, layout: 'grid', q: '', series: '' };
 let bios = {};            // console id -> check results
+let padState = {};        // console id -> RPCS3 controller profile state (see app/pads.js)
 let inEmu = {};           // console id -> { bios id: version } found inside the emulator's own folder
 let onlineRoots = {};     // 'D:\\' -> true/false
 let running = null;       // { gid, started }
@@ -219,6 +220,8 @@ function health(cid) {
     else if (r.md5ok === false) msg = `${b.label} is there, but its checksum is wrong — the dump is probably bad.`;
     if (msg) issues.push({ lvl: b.required ? 'bad' : 'warn', text: msg, fix: 'firmware', label: 'Open Firmware' });
   });
+  const pad = padState[cid];
+  if (pad && (pad.state === 'missing' || pad.state === 'keyboard')) issues.push({ lvl: 'warn', text: pad.state === 'missing' ? 'RPCS3 has no controller set up, so games would use the keyboard.' : 'RPCS3 is set to use the keyboard, not a controller.', fix: 'pads:' + cid, label: 'Set up controller' });
   const games = S.games.filter(g => g.console === cid && !g.hidden).length;
   if (!conf.folders.length) issues.push({ lvl: 'warn', text: 'No game folders added yet.', fix: 'console:' + cid, label: 'Add a folder' });
   const ready = !issues.some(i => i.lvl === 'bad');
@@ -230,6 +233,7 @@ const statusColor = s => ({ ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--ba
 
 async function checkBios(cid) {
   const c = byId(C, cid); const dir = biosDir(cid);
+  if (cid === 'ps3') padState.ps3 = cc('ps3').emulator === 'rpcs3' && emuPath('rpcs3') ? await window.ef.pads.status(emuPath('rpcs3')) : null;
   if (!c.bios.length) { bios[cid] = []; return; }
   bios[cid] = dir ? await window.ef.checkBios({ folder: dir, items: c.bios }) : [];
   // Firmware the emulator has already installed into its own folder (e.g. RPCS3's dev_flash) counts as present.
@@ -343,6 +347,10 @@ async function play(gid) {
       const go = await confirmBox('Low memory', `Only <b>${free} GB</b> of RAM is free and ${esc(c.short)} emulation wants about <b>${c.ram} GB</b>. Close browsers, Discord overlays or other games first for smooth play.`, 'Play anyway');
       if (!go) return;
     }
+  }
+  if (g.console === 'ps3' && emuId === 'rpcs3' && set().padAutoSetup && padState.ps3 && padState.ps3.state === 'missing') {
+    const r = await window.ef.pads.setup({ exe: emuPath('rpcs3') });
+    if (r.ok && r.kind) { toast(`Set up your ${esc(r.name)} for PS3 games.`, 'ok'); await checkBios('ps3'); }
   }
   blip('play');
   const res = c.launch === 'appx'
@@ -679,6 +687,7 @@ V.console = (cid) => {
           ${chk(h.emuOk, false, 'Emulator', c.launch === 'appx' ? 'None needed: games installed with WinDurango start directly' : h.emuOk ? `${esc(emu.name)} linked` : `${esc(emu.name)} not linked`)}
           ${(() => { const miss = h.issues.filter(i => i.fix === 'firmware');
             return chk(!miss.length, h.biosOk, 'Firmware', !c.bios.length ? 'None needed' : !miss.length ? 'All present' : h.biosOk ? 'Optional files missing' : 'Missing files'); })()}
+          ${padState[cid] && padState[cid].state !== 'unknown' ? chk(padState[cid].state === 'set', true, 'Controller', padState[cid].state === 'set' ? `${esc(padState[cid].handler)} set up in RPCS3` : padState[cid].state === 'keyboard' ? 'RPCS3 uses the keyboard' : 'Not set up: games would use the keyboard') : ''}
           ${chk(h.games > 0, true, 'Games', h.games ? `${h.games} in library` : 'None found yet')}
         </div>
       </div>
@@ -1119,6 +1128,7 @@ const SETTINGS = [
     ['gameTdbArt', 'PS3 covers from GameTDB', 'A community cover database with box art for most PS3 games, used in place of the small disc icon. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['compatCheck', 'Check which games run', 'Looks up PS3 games on RPCS3’s compatibility list and Xbox 360 games on Xenia Canary’s. Only the game’s disc ID is sent. Refreshed weekly.', 'toggle'],
     ['compatBadges', 'Show “will it run?” badges on covers', 'The game’s details always show it.', 'toggle'],
+    ['padAutoSetup', 'Set up my controller for PS3 games', 'If RPCS3 has no controller set up, EchoForge sets up your connected PS4, PS5 or Xbox-style controller before a PS3 game starts. A setup you made in RPCS3 is never changed.', 'toggle'],
     ['scanDepth', 'Folder scan depth', 'How many subfolders deep to look. PS3/PS4 folders need at least 4.', 'range', [2, 10, 1]],
     ['ignore', 'Ignore paths containing', 'Comma separated, e.g. update, dlc, backup', 'text'],
     ['_rescan', 'Rescan everything', 'Runs a full scan of every console folder now.', 'button', 'Scan all']
@@ -1333,7 +1343,16 @@ function wizard(step = 0) {
 // ---------------- actions ----------------
 let appVersion = '';
 const ACT = {
-  go: (arg) => { const [v, p] = arg.split(':'); closeModal(); go(v, p || null); },
+  go: (arg) => { const [v, p] = arg.split(':'); if (v === 'pads') { closeModal(); return ACT.padSetup(p); } closeModal(); go(v, p || null); },
+  padSetup: async (cid) => {
+    const exe = emuPath('rpcs3'); if (!exe) return toast('Link RPCS3 first.', 'bad');
+    const st = padState[cid] || {};
+    if (st.state === 'keyboard' && !await confirmBox('Use a controller instead of the keyboard?', 'RPCS3 is set to use the keyboard for player 1. EchoForge will switch it to your connected controller and keep your current setup as a backup.', 'Use controller')) return;
+    const r = await window.ef.pads.setup({ exe, force: st.state === 'keyboard' });
+    await checkBios(cid); renderSide(); render();
+    if (!r.ok) return toast(esc(r.error), 'bad');
+    toast(r.already ? 'RPCS3 already has a controller set up.' : `Your ${esc(r.name)} is set up for PS3 games.`, 'ok');
+  },
   close: () => closeModal(),
   scrim: (_a, el, ev) => { if (ev.target === el) closeModal(); },
   winMin: () => window.ef.win.min(), winMax: () => window.ef.win.max(), winClose: () => window.ef.win.close(),
