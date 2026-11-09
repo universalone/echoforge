@@ -786,6 +786,12 @@ let inboxT = null;
 let dlFolder = ''; // Windows' Downloads folder as it is now (it moves to another drive when this one runs low)
 const inboxFolder = () => trimRoot(set().inboxFolder);
 const inboxFolders = () => [inboxFolder()].filter(Boolean);
+// When Downloads moves to another drive, an Import folder that was the old Downloads folder moves with it.
+function followDownloads(from, to) {
+  const s = set(), same = (a, b) => !!a && !!b && trimRoot(a).toLowerCase() === trimRoot(b).toLowerCase();
+  if (!to || same(from, to) || !same(s.inboxFolder, from)) return false;
+  s.inboxFolder = trimRoot(to); save(); return true;
+}
 // When the Downloads drive drops below the limit, point Downloads at the other drive (see app/downloads.js).
 async function checkDownloadsDrive(announce = true) {
   const s = set();
@@ -793,7 +799,7 @@ async function checkDownloadsDrive(announce = true) {
   if (!r) return;
   const before = inboxFolders().join('|');
   if (r.switched) {
-    s.dlPrevFolder = r.from; s.dlSwitchedAt = Date.now(); save(); dlFolder = r.to;
+    s.dlPrevFolder = r.from; s.dlSwitchedAt = Date.now(); save(); dlFolder = r.to; followDownloads(r.from, r.to);
     if (announce) toast(`Your ${esc(r.from.slice(0, 2))} drive is down to ${Math.round(r.free)} GB, so new downloads now go to <b>${esc(r.to)}</b>. Restart your browser so it picks up the new folder.`, 'ok');
   } else {
     dlFolder = r.folder;
@@ -1552,6 +1558,7 @@ const ACT = {
     const s = set(), prev = s.dlPrevFolder; if (!prev) return;
     const r = await window.ef.downloads.set(prev);
     if (!r.ok) return toast('Windows didn’t accept that folder.', 'bad');
+    followDownloads(dlFolder, r.folder);
     s.dlAutoSwitch = false; s.dlPrevFolder = ''; dlFolder = r.folder; save();
     window.ef.inbox.watch(inboxFolders()); refreshInbox(); render();
     toast(`Downloads is back in <b>${esc(prev)}</b>. Restart your browser so it picks up the change.`, 'ok');
@@ -1720,6 +1727,7 @@ window.addEventListener('gamepadconnected', (e) => { if (set() && set().gamepad)
   if (set().backupWeekly && Date.now() - (set().backupLast || 0) > 7 * 864e5) setTimeout(() => { if (!running) backupSaves(null, 'weekly', true); }, 25000);
   homePath = (await window.ef.paths()).home;
   dlFolder = (await window.ef.downloads.status()).folder || '';
+  if (set().dlPrevFolder) followDownloads(set().dlPrevFolder, dlFolder);
   window.ef.inbox.watch(inboxFolders()); setTimeout(() => refreshInbox(false), 1500);
   if (set().appUpdateCheck && Date.now() - (set().appUpdateLast || 0) > 864e5) setTimeout(() => checkAppUpdate(true), 20000); // once a day
   if (set().emuUpdateCheck && Date.now() - (set().emuUpdateLast || 0) > 864e5) setTimeout(() => checkEmuUpdates(true), 30000); // once a day
