@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('ef', {
   onCompat: (fn) => ipcRenderer.on('compat:result', (_e, v) => fn(v)),
   ready: () => ipcRenderer.send('app:ready'),
   splashStatus: (m) => ipcRenderer.send('splash:status', m),
+  splashPick: invoke('splash:pick'),
+  splashPreview: invoke('splash:preview'),
   win: {
     min: () => ipcRenderer.send('win:min'),
     max: () => ipcRenderer.send('win:max'),

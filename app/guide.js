@@ -94,6 +94,7 @@ window.EF_GUIDE = [
     steps: [
       { text: 'General: the page EchoForge opens on, Start with Windows, emulator update checks and the setup assistant.', go: 'settings' },
       { text: 'Appearance: accent color, background, cover size and shape, and the glow effects.' },
+      { text: 'Appearance → Splash screen picks what you see while EchoForge opens: EchoForge, Cartridge, Disc, Orb, Cube, Neon, Minimal, or your own picture or video. Choose the size (up to full screen) and how long it shows, then press Preview.' },
       { text: 'Library, Import and Launching & performance: where games live, how new games are added and what happens when a game starts.' },
       { text: 'Controller, Sound and Big Picture: button labels, rumble, interface sounds and the TV view.' },
       { text: 'Accessibility: less motion, high contrast and a bolder outline around the selected item.' }

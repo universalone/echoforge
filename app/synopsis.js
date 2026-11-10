@@ -16,10 +16,10 @@ const isGame = d => /\bgame\b/i.test(d || '') && !/franchise|series|character|me
 
 // Picks the article for a game from Wikipedia's search results, or null. Games whose name doesn't match are refused,
 // so a short name like "Black" never ends up with the wrong article.
-function pick(pages, names) {
+function pick(pages, names, consoleName = '') {
   const wanted = names.map(words).filter(w => w.length);
   if (!wanted.length) return null;
-  let best = null, bestScore = 0;
+  const scored = [];
   for (const p of [...(pages || [])].sort((a, b) => (a.index || 0) - (b.index || 0))) {
     if (!isGame(p.description) || /^list of/i.test(p.title) || !p.extract) continue;
     const t = words(p.title).join(' ');
@@ -30,10 +30,13 @@ function pick(pages, names) {
       else if (w.length > 1 && (t.startsWith(n + ' ') || n.startsWith(t + ' ')) && Math.min(t.length, n.length) >= 6 && !/^\d/.test((t.length > n.length ? t.slice(n.length) : n.slice(t.length)).trim())) score = Math.max(score, 2); // subtitle added or missing, never a sequel number
       else if (w.length > 1 && w.every(x => t.split(' ').includes(x)) && nums(t) === nums(n)) score = Math.max(score, 1); // same words, same sequel number
     }
-    if (score > bestScore) { best = p; bestScore = score; }
-    if (score === 3) break;
+    if (score) scored.push([score, p]);
   }
-  return best;
+  if (!scored.length) return null;
+  // Same name (an original and its remake): the one that mentions the console, then the oldest.
+  const top = Math.max(...scored.map(x => x[0])), con = String(consoleName || '').toLowerCase();
+  const rank = p => [con && String(p.extract).toLowerCase().includes(con) ? 0 : 1, +((p.description || '').match(/\b(?:19|20)\d\d\b/) || [9999])[0]];
+  return scored.filter(x => x[0] === top).map(x => x[1]).sort((a, b) => { const ra = rank(a), rb = rank(b); return ra[0] - rb[0] || ra[1] - rb[1]; })[0];
 }
 
 // First paragraph or two, cut at a sentence end. Pronunciation and empty brackets are removed.
@@ -81,8 +84,8 @@ async function lookup({ names, consoleName }, get = getJson) {
   if (!names.length) return { ok: false, reason: 'noname' };
   let page = null;
   for (const n of names) {
-    page = pick(await search(`${key(n)} video game`, get), names);
-    if (!page && consoleName) page = pick(await search(`${key(n)} ${consoleName} game`, get), names);
+    page = pick(await search(`${key(n)} video game`, get), names, consoleName);
+    if (!page && consoleName) page = pick(await search(`${key(n)} ${consoleName} game`, get), names, consoleName);
     if (page) break;
   }
   if (!page) return { ok: false, reason: 'nomatch' };

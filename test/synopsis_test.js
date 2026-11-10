@@ -27,6 +27,8 @@ check('a game whose name doesn’t match gets nothing', S.pick(BLACK, ['Halo 3']
 check('one word in common isn’t a match', S.pick([page(1, 'Black Tiger (video game)', '1987 video game', 'x')], ['Black']) === null);
 check('a missing subtitle still matches', S.pick([page(1, 'Kingdom Hearts II: Final Mix', '2007 video game', 'x')], ['Kingdom Hearts II']).title === 'Kingdom Hearts II: Final Mix');
 check('a sequel isn’t the first game', S.pick([page(1, 'Kingdom Hearts II', '2005 video game', 'x'), page(2, 'Halo 2', '2004 video game', 'x')], ['Kingdom Hearts', 'Halo']) === null);
+check('an original beats its remake of the same name', S.pick([page(1, 'Zelda: Ocarina (2026 video game)', '2026 video game', 'A remake for Switch.'), page(2, 'Zelda: Ocarina', '1998 video game', 'A game for the Nintendo 64.')], ['Zelda Ocarina'], 'Nintendo 64').description === '1998 video game');
+check('the console decides before the year', S.pick([page(1, 'Tetris', '1985 video game', 'Tetris on many computers.'), page(2, 'Tetris (Game Boy video game)', '1989 video game', 'Tetris for the Game Boy.')], ['Tetris'], 'Game Boy').title === 'Tetris (Game Boy video game)');
 check('“game” descriptions only', S.isGame('2006 racing video game') && S.isGame('2005 open world racing game') && !S.isGame('Video game franchise') && !S.isGame('Fictional character'));
 
 const long = Array.from({ length: 30 }, (_, i) => `Sentence number ${i} is here.`).join(' ');

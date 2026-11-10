@@ -485,3 +485,10 @@ input[type=range] { accent-color: var(--a2); width: 200px; }
 .gp-aboutfoot { display: flex; gap: 16px; align-items: center; margin-top: 2px; }
 [data-bigpic="on"] .gp-about { font-size: 18px; }
 textarea.input { resize: vertical; min-height: 70px; font: inherit; line-height: 1.45; }
+
+/* Splash screen picker */
+.splashes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; width: 100%; }
+.splashcard { text-align: left; padding: 10px 12px; border-radius: var(--rad, 10px); background: var(--panel); border: var(--bw, 1px) solid var(--line); color: var(--text); cursor: pointer; display: grid; gap: 3px; font: inherit; }
+.splashcard b { font-size: 13px; } .splashcard span { font-size: 11px; color: var(--muted); line-height: 1.35; }
+.splashcard:hover, .splashcard:focus-visible { border-color: var(--a2); }
+.splashcard.on { border-color: var(--a2); box-shadow: 0 0 0 2px color-mix(in srgb, var(--a2) 35%, transparent); }

@@ -29,15 +29,68 @@ try {
   if (raw && raw.settings && raw.settings.disableGpu) app.disableHardwareAcceleration();
 } catch { /* first run */ }
 
-function createSplash() {
-  splash = new BrowserWindow({
-    width: 560, height: 380, frame: false, transparent: true, resizable: false,
-    alwaysOnTop: true, skipTaskbar: true, show: false, icon: ICON,
-    webPreferences: { preload: path.join(__dirname, 'splash-preload.js'), contextIsolation: true, sandbox: true }
-  });
-  splash.loadFile(path.join(__dirname, 'splash.html'));
-  splash.once('ready-to-show', () => splash.show());
+// Splash screen: Settings → Appearance → Splash screen. A style, a size, and optionally your own picture or video
+// (copied into EchoForge's folder, so moving the original doesn't break it).
+const SPLASH_STYLES = ['forge', 'cartridge', 'disc', 'orb', 'cube', 'neon', 'minimal', 'custom'];
+const SPLASH_MEDIA = /\.(png|jpe?g|webp|gif|mp4|webm|m4v)$/i;
+const splashDir = () => path.join(app.getPath('userData'), 'splash');
+function splashSettings(o) {
+  let st = o;
+  if (!st) { try { st = JSON.parse(fs.readFileSync(DATA_FILE(), 'utf8')).settings || {}; } catch { st = {}; } }
+  const file = typeof st.splashFile === 'string' ? path.join(splashDir(), path.basename(st.splashFile)) : '';
+  let style = SPLASH_STYLES.includes(st.splash) ? st.splash : 'forge';
+  if (style === 'custom' && !(file && SPLASH_MEDIA.test(file) && fs.existsSync(file))) style = 'forge';
+  return { style, file: style === 'custom' ? file : '', size: ['card', 'large', 'full'].includes(st.splashSize) ? st.splashSize : 'card',
+    min: Math.min(10, Math.max(1, Number(st.splashMin) || 2.4)), toEnd: st.splashToEnd !== false, sound: !!st.splashSound, fit: st.splashFit === 'contain' ? 'contain' : 'cover' };
 }
+function openSplash(o) {
+  const { screen } = require('electron');
+  const area = screen.getPrimaryDisplay().bounds;
+  const dims = o.size === 'full' ? { x: area.x, y: area.y, width: area.width, height: area.height } : o.size === 'large' ? { width: 980, height: 560 } : { width: 560, height: 380 };
+  const w = new BrowserWindow({
+    ...dims, frame: false, transparent: o.size !== 'full', backgroundColor: o.size === 'full' ? '#000000' : undefined, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false, icon: ICON,
+    webPreferences: { preload: path.join(__dirname, 'splash-preload.js'), contextIsolation: true, sandbox: true, autoplayPolicy: 'no-user-gesture-required' }
+  });
+  const query = { style: o.style, size: o.size, fit: o.fit, sound: o.sound ? '1' : '0' };
+  if (o.file) query.media = require('url').pathToFileURL(o.file).href;
+  w.loadFile(path.join(__dirname, 'splash.html'), { query });
+  w.once('ready-to-show', () => w.show());
+  return w;
+}
+let splashOpts = null, splashMediaEnded = null;
+function createSplash() {
+  splashOpts = splashSettings();
+  splash = openSplash(splashOpts);
+}
+// A video splash can play to its end (up to 15 s) before EchoForge opens.
+const splashMediaDone = () => new Promise(res => { splashMediaEnded = res; setTimeout(res, 15000); });
+ipcMain.on('splash:mediaEnd', () => { if (splashMediaEnded) splashMediaEnded(); });
+ipcMain.handle('splash:pick', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Choose a picture or video for the splash screen', properties: ['openFile'],
+    filters: [{ name: 'Pictures and videos', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'm4v'] }] });
+  if (r.canceled || !r.filePaths[0]) return { ok: false };
+  const src = r.filePaths[0];
+  if (!SPLASH_MEDIA.test(src)) return { ok: false, error: 'Choose a PNG, JPEG, WebP or GIF picture, or an MP4 or WebM video.' };
+  const size = (await fsp.stat(src)).size;
+  if (size > 300 * 1024 * 1024) return { ok: false, error: 'That file is over 300 MB. Choose a shorter video.' };
+  await fsp.mkdir(splashDir(), { recursive: true });
+  const name = 'custom-' + Date.now() + path.extname(src).toLowerCase();
+  await fsp.copyFile(src, path.join(splashDir(), name));
+  for (const f of await fsp.readdir(splashDir())) if (f !== name) await fsp.rm(path.join(splashDir(), f), { force: true }); // only the newest is kept
+  return { ok: true, file: name, original: path.basename(src) };
+});
+let previewWin = null;
+ipcMain.handle('splash:preview', async (_e, st) => {
+  if (previewWin && !previewWin.isDestroyed()) previewWin.destroy();
+  const o = splashSettings(st || {});
+  const w = previewWin = openSplash(o);
+  const video = o.file && /\.(mp4|webm|m4v)$/i.test(o.file);
+  await new Promise(res => w.once('ready-to-show', res));
+  await Promise.all([new Promise(r => setTimeout(r, Math.max(2400, o.min * 1000))), video && o.toEnd ? splashMediaDone() : null]);
+  if (!w.isDestroyed()) { w.webContents.send('splash:done'); setTimeout(() => { if (!w.isDestroyed()) w.destroy(); }, 500); }
+  return { ok: true, style: o.style };
+});
 
 function createMain() {
   win = new BrowserWindow({
@@ -57,9 +110,13 @@ app.whenReady().then(() => {
   createSplash();
   const shownAt = Date.now();
   createMain();
-  // Renderer says when the library is loaded; the splash stays at least 2.4 s so the animation finishes.
-  ipcMain.once('app:ready', () => {
-    const wait = Math.max(0, 2400 - (Date.now() - shownAt));
+  // Renderer says when the library is loaded; the splash stays at least as long as Settings asks (2.4 s by default)
+  // so the animation finishes, and a video splash can play to its end.
+  const video = splashOpts.file && /\.(mp4|webm|m4v)$/i.test(splashOpts.file);
+  const mediaDone = video && splashOpts.toEnd ? splashMediaDone() : Promise.resolve();
+  ipcMain.once('app:ready', async () => {
+    await mediaDone;
+    const wait = Math.max(0, splashOpts.min * 1000 - (Date.now() - shownAt));
     setTimeout(() => {
       if (splash) { splash.webContents.send('splash:done'); }
       setTimeout(() => { if (splash) splash.destroy(); splash = null; win.show(); win.focus(); }, 450);

@@ -37,7 +37,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
   wheel: null, wheelPcsx2Index: 1, skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
-  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, xboxUnityArt: false, gameTdbArt: false,
+  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'card', splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
@@ -1388,6 +1388,7 @@ const SETTINGS = [
   ] },
   { id: 'look', name: 'Appearance', rows: [
     ['skin', 'Skin', 'A skin sets the colors, background, headings font and corner style. Make one from any game’s cover art, let EchoForge invent one, or share yours as a file.', 'skins'],
+    ['splash', 'Splash screen', 'What you see while EchoForge opens. Every style shows EchoForge’s name; press Preview to watch it.', 'splash'],
     ['theme', 'Accent', 'The forge color used across the app.', 'swatch'],
     ['mode', 'Background', '', 'select', [['dark', 'Graphite (dark)'], ['oled', 'OLED black'], ['light', 'Light']]],
     ['card', 'Cover size', '', 'range', [130, 280, 2]],
@@ -1476,6 +1477,21 @@ const SETTINGS = [
 ];
 let setTab = 'general';
 const dlHelp = () => { const s = set(); return `Now ${dlFolder || 'your Downloads folder'}.` + (s.dlPrevFolder ? ` Moved from ${s.dlPrevFolder} ${fmtAgo(s.dlSwitchedAt)} because that drive was low. Switching back points Downloads there again and turns the automatic move off.` : ''); };
+// Splash screens: original styles inspired by each console era (no console makers' logos), or your own picture or video.
+const SPLASHES = [['forge', 'EchoForge', 'Embers and the forge logo'], ['cartridge', 'Cartridge', 'An 8-bit power-on with a pixel logo'], ['disc', 'Disc', 'A glossy disc spins up'],
+  ['orb', 'Orb', 'An energy orb with rings in orbit'], ['cube', 'Cube', 'A wireframe cube tumbles in'], ['neon', 'Neon', 'A sunset over a moving grid'],
+  ['minimal', 'Minimal', 'Just the logo on black'], ['custom', 'Your own', 'A picture or video you choose']];
+function splashHTML(s) {
+  const custom = s.splash === 'custom', video = /\.(mp4|webm|m4v)$/i.test(s.splashFile || '');
+  return `<div class="splashes">${SPLASHES.map(([id, name, note]) => `<button class="splashcard ${s.splash === id ? 'on' : ''}" data-act="splashStyle" data-arg="${id}"><b>${esc(name)}</b><span>${esc(note)}</span></button>`).join('')}</div>
+    ${custom ? `<div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap"><button class="btn sm" data-act="splashPick">${s.splashFile ? 'Choose another file' : 'Choose a picture or video'}</button>
+      <span class="small muted">${s.splashFile ? esc(s.splashName || s.splashFile) : 'PNG, JPEG, WebP, GIF, MP4 or WebM, up to 300 MB. EchoForge keeps its own copy.'}</span></div>
+      <div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap"><label class="small">Fit <select class="input" data-set="splashFit"><option value="cover" ${s.splashFit !== 'contain' ? 'selected' : ''}>Fill the screen</option><option value="contain" ${s.splashFit === 'contain' ? 'selected' : ''}>Show all of it</option></select></label>
+      ${video ? `<label class="small row" style="gap:6px"><input type="checkbox" class="toggle" data-set="splashToEnd" ${s.splashToEnd !== false ? 'checked' : ''}> Play the video to the end (up to 15 s)</label><label class="small row" style="gap:6px"><input type="checkbox" class="toggle" data-set="splashSound" ${s.splashSound ? 'checked' : ''}> Sound</label>` : ''}</div>` : ''}
+    <div class="row" style="margin-top:12px;gap:14px;flex-wrap:wrap"><label class="small">Size <select class="input" data-set="splashSize">${[['card', 'Card'], ['large', 'Large'], ['full', 'Full screen']].map(([v, l]) => `<option value="${v}" ${s.splashSize === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="small row" style="gap:8px">Show for at least <input type="range" min="1" max="10" step="0.5" value="${s.splashMin}" data-set="splashMin" data-num><span class="mono">${s.splashMin} s</span></label>
+      <button class="btn sm primary" data-act="splashPreview">Preview</button></div>`;
+}
 V.settings = () => {
   const s = set(); const sec = SETTINGS.find(x => x.id === setTab);
   const ctl = ([k, , , type, opt]) => {
@@ -1488,6 +1504,7 @@ V.settings = () => {
     if ((k === 'theme' || k === 'mode') && (s.skin || 'forge') !== 'forge') return '<span class="small muted">Set by your skin. Pick the EchoForge skin to change it.</span>';
     if (type === 'skins') return skinDraft ? skinEditorHTML() : skinCards(s);
     if (type === 'homeeditor') return homeEditorHTML();
+    if (type === 'splash') return splashHTML(s);
     if (type === 'wheel') return wheelPanelHTML();
     if (type === 'button') return `<button class="btn" data-act="${k}">${esc(opt)}</button>`;
     if (type === 'danger') return `<button class="btn danger" data-act="${k}">${esc(opt)}</button>`;
@@ -1499,7 +1516,7 @@ V.settings = () => {
     <div class="row">${appUp.info && appUp.info.ok && appUp.info.update ? `<button class="btn sm primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : `Update to ${esc(appUp.info.latest.version)}`}</button>` : ''}<button class="btn sm" data-act="appUpCheck" ${appUp.busy ? 'disabled' : ''}>Check for updates</button><button class="btn sm" data-act="openData">Open data folder</button></div></div></div>`;
   return `<div class="view"><h1 class="h1">Settings</h1><p class="sub">Every change saves instantly.</p>
     <div class="setwrap"><div class="setnav">${SETTINGS.map(x => `<button class="${x.id === setTab ? 'on' : ''}" data-act="stab" data-arg="${x.id}">${esc(x.name)}</button>`).join('')}</div>
-    <div class="panel">${setTab === 'about' ? about : sec.rows.map(r => { const help = r[0] === '_dlBack' ? dlHelp() : r[2]; return `<div class="setrow${r[3] === 'skins' || r[3] === 'homeeditor' || r[3] === 'wheel' ? ' col' : ''}"><div class="lbl"><b>${esc(r[1])}</b>${help ? `<span>${esc(help)}</span>` : ''}</div>${ctl(r)}</div>`; }).join('')}</div></div></div>`;
+    <div class="panel">${setTab === 'about' ? about : sec.rows.map(r => { const help = r[0] === '_dlBack' ? dlHelp() : r[2]; return `<div class="setrow${r[3] === 'skins' || r[3] === 'homeeditor' || r[3] === 'wheel' || r[3] === 'splash' ? ' col' : ''}"><div class="lbl"><b>${esc(r[1])}</b>${help ? `<span>${esc(help)}</span>` : ''}</div>${ctl(r)}</div>`; }).join('')}</div></div></div>`;
 };
 
 // ---------------- game details ----------------
@@ -1813,6 +1830,9 @@ const ACT = {
     if ($('#modal .steps')) wizard(wz.step); else render();
   },
   // Standard layout: <fast or storage root>\<console dir>, created if missing. No arg = every enabled console.
+  splashStyle: (id) => { set().splash = id; save(); render(); if (id === 'custom' && !set().splashFile) ACT.splashPick(); },
+  splashPick: async () => { const r = await window.ef.splashPick(); if (r.error) return toast(r.error, 'bad'); if (!r.ok) return; Object.assign(set(), { splash: 'custom', splashFile: r.file, splashName: r.original }); save(); render(); toast('Splash screen set. Press Preview to watch it.', 'ok'); },
+  splashPreview: async () => { const s = set(); await window.ef.splashPreview({ splash: s.splash, splashFile: s.splashFile, splashSize: s.splashSize, splashMin: s.splashMin, splashToEnd: s.splashToEnd, splashSound: s.splashSound, splashFit: s.splashFit }); },
   useRomDirs: async (cid) => {
     const root = set().romRoot; if (!root) return toast('Set a ROM library root in Settings → Library first.', 'bad');
     const ids = (cid ? [cid] : enabledConsoles().map(c => c.id));
