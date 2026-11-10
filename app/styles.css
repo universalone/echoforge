@@ -400,3 +400,77 @@ input[type=range] { accent-color: var(--a2); width: 200px; }
 .tour-spot { position: fixed; border: 2px solid var(--a2); border-radius: 8px; box-shadow: 0 0 0 9999px rgba(4, 4, 6, .7), 0 0 24px color-mix(in srgb, var(--a2) 60%, transparent); pointer-events: none; transition: all calc(.25s * var(--speed, 1)) ease; }
 .tour-card { position: fixed; width: 360px; max-width: calc(100vw - 32px); background: var(--panel-solid); border-color: var(--line2); }
 .tour-card h3 { margin: 4px 0 6px; font: 600 20px var(--display); letter-spacing: .04em; text-transform: uppercase; }
+
+/* ---------- skins (app/skins.js) ---------- */
+.bgwall { position: fixed; inset: -30px; pointer-events: none; z-index: 0; background: center / cover no-repeat; opacity: 0;
+  filter: blur(10px) saturate(1.1) brightness(.62); transition: opacity calc(.6s * var(--speed)) ease; }
+.bgwall.on { opacity: var(--wall-op, .35); }
+[data-mode="light"] .bgwall { filter: blur(10px) saturate(1.1) brightness(1.1); }
+[data-corners="round"] :is(.search, .nav .chip, .panel, .btn, .hero, .ctile, .cover, .playov span, .chead, .swatch, .modal) { clip-path: none; border-radius: var(--rad, 16px); }
+[data-corners="round"] :is(.btn, .search, .nav .chip, .swatch) { border-radius: calc(var(--rad, 16px) * .62); }
+[data-corners="round"] .playov span { border-radius: 50%; }
+[data-corners="square"] :is(.search, .nav .chip, .panel, .btn, .hero, .ctile, .cover, .playov span, .chead, .swatch, .modal) { clip-path: none; border-radius: var(--rad, 2px); }
+/* Angled corners at the chosen size (the panels already follow --cut). */
+[data-skinshape="on"][data-corners="cut"] :is(.btn, .search) { clip-path: polygon(calc(var(--cut) * .6) 0, 100% 0, 100% calc(100% - calc(var(--cut) * .6)), calc(100% - calc(var(--cut) * .6)) 100%, 0 100%, 0 calc(var(--cut) * .6)); }
+[data-skinshape="on"][data-corners="cut"] :is(.hero, .chead, .modal, .ctile) { clip-path: polygon(calc(var(--cut) * 1.6) 0, 100% 0, 100% calc(100% - calc(var(--cut) * 1.6)), calc(100% - calc(var(--cut) * 1.6)) 100%, 0 100%, 0 calc(var(--cut) * 1.6)); }
+/* Border thickness and style from the skin, on everything that has a frame. */
+[data-skinshape="on"] :is(.panel, .search, .hero, .chead, .ctile, .modal, .input, .folder) { border-width: var(--bw, 1px); border-style: var(--bstyle, solid); }
+[data-skinshape="on"] .btn:not(.primary):not(.ghost) { border-width: var(--bw, 1px); border-style: var(--bstyle, solid); }
+.setrow.col { flex-direction: column; align-items: stretch; }
+.anycolor { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.anycolor input { width: 34px; height: 34px; padding: 0; border: 1px solid var(--line2); background: none; cursor: pointer; }
+.skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.skincard { position: relative; }
+.skinpick { width: 100%; display: flex; flex-direction: column; gap: 3px; padding: 0 0 9px; background: var(--panel-solid); border: 2px solid var(--line2);
+  border-radius: 8px; cursor: pointer; text-align: left; overflow: hidden; color: var(--text); }
+.skinpick:hover, .skinpick:focus-visible { border-color: color-mix(in srgb, var(--a2) 60%, transparent); }
+.skincard.on .skinpick { border-color: var(--a2); box-shadow: 0 0 18px color-mix(in srgb, var(--a2) 35%, transparent); }
+.skinpick .sw { position: relative; height: 66px; background: linear-gradient(160deg, var(--sbg2), var(--sbg)); overflow: hidden; margin-bottom: 4px; }
+.skinpick .sw img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; filter: brightness(.75); transition: opacity .25s; }
+.skinpick .sw::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: 10px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--s3), var(--s1) 50%, var(--s2)); box-shadow: 0 0 10px var(--s1); }
+.skinpick b { padding: 0 10px; font: 600 12.5px var(--display); }
+.skinpick small { padding: 0 10px; color: var(--muted); font-size: 11px; }
+.skincard .x { position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .65); color: #fff; cursor: pointer; line-height: 1; }
+.skinrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.skinedit { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 14px 0; }
+.skinedit label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+.skinedit input[type=range], .skinedit .input { width: 100%; min-width: 0; }
+.skinedit input[type=color] { width: 100%; height: 38px; border: 1px solid var(--line2); background: none; padding: 2px; cursor: pointer; }
+.skinpicker { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 52vh; overflow: auto; padding: 2px; }
+.skinpicker button { position: relative; aspect-ratio: 3 / 4; padding: 0; border: 2px solid transparent; background: var(--panel-solid); cursor: pointer; overflow: hidden; }
+.skinpicker button:hover, .skinpicker button:focus-visible { border-color: var(--a2); }
+.skinpicker img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s; }
+.skinpicker span { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; font-size: 10.5px; background: rgba(0, 0, 0, .72); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+
+/* ---------- Home dashboards ---------- */
+.view.home-big { --card: 250px; }
+.view.home-big .shelf { gap: 22px; }
+.layouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.lcard { position: relative; }
+.lpick { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; text-align: left; background: var(--panel-solid); border: 2px solid var(--line2); border-radius: 8px; color: var(--text); cursor: pointer; }
+.lpick:hover, .lpick:focus-visible { border-color: color-mix(in srgb, var(--a2) 60%, transparent); }
+.lcard.on .lpick { border-color: var(--a2); box-shadow: 0 0 16px color-mix(in srgb, var(--a2) 30%, transparent); }
+.lpick b { font: 600 14px var(--display); } .lpick small { color: var(--muted); font-size: 11.5px; }
+.lcard .x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; }
+.hsecs { display: flex; flex-direction: column; gap: 6px; }
+.hsec { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--line); }
+.hsec.off { opacity: .6; }
+.hsec .btn.sm { padding: 0 10px; }
+
+/* Edit / Preview tabs and the Home preview */
+.subtabs { display: inline-flex; gap: 4px; padding: 4px; margin: 4px 0 14px; background: var(--bg2); border: 1px solid var(--line); }
+.subtabs button { padding: 7px 18px; border: 0; background: none; color: var(--muted); font: 600 12px var(--display); letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.subtabs button.on { background: var(--grad); color: #111; }
+.setrow.col > * { min-width: 0; max-width: 100%; }
+.hprev { width: 100%; min-width: 0; height: 560px; overflow-y: auto; border: 1px solid var(--line2); background: var(--bg); position: relative; }
+.hprev-inner { zoom: .55; pointer-events: none; padding: 24px; }
+.hprev-inner .view { padding: 0; max-width: none; }
+.hprev-inner .shelf { overflow: hidden; }
+.setwrap > .panel { min-width: 0; }
+
+/* ---------- racing wheel setup ---------- */
+.wheelcal { padding: 16px 18px; background: var(--bg2); border: 1px solid color-mix(in srgb, var(--a2) 50%, transparent); }
+.wheeltext { font: 600 18px var(--display); margin: 6px 0 4px; }
+#wheelNote { color: var(--a1); min-height: 18px; }
+.wheelmeter { height: 8px; margin: 10px 0 8px; background: var(--line); overflow: hidden; } .wheelmeter i { display: block; height: 100%; width: 0; background: var(--grad); transition: width .08s; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--a1); cursor: pointer; font: inherit; text-decoration: underline; }

@@ -36,14 +36,14 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 // ---------------- state ----------------
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
-  theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
+  wheel: null, wheelPcsx2Index: 1, skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
   sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
   emuUpdateCheck: true, emuUpdateLast: 0, appUpdateCheck: true, appUpdateLast: 0, appUpdateLater: '',
   backupRoot: '', backupAfterPlay: true, backupWeekly: true, backupKeep: 10, backupLast: 0,
-  onLaunch: 'minimize', priority: 'above', ramGuard: true, playtime: true, confirmStop: true, gameMode: true,
+  onLaunch: 'minimize', priority: 'above', ramGuard: true, playtime: true, confirmStop: true, gameMode: true, quitCombo: true, quitKey: 'Ctrl+Shift+Q', pauseMenu: true, pauseKey: 'Ctrl+Shift+P', pauseFreeze: true,
   gamepad: true, padLabels: 'xbox', deadzone: 0.35, rumble: true,
   sounds: true, volume: 40,
   bigpicStart: false, bigpicFullscreen: true,
@@ -194,6 +194,261 @@ function applyLook() {
   r.dataset.bgart = s.bgArt ? 'on' : 'off'; r.style.setProperty('--bgblur', `${s.bgBlur}px`); r.style.setProperty('--bgart-op', s.bgArtStrength / 100); r.dataset.cover = s.cover; r.dataset.titles = s.titles ? 'on' : 'off';
   r.dataset.compact = s.compact ? 'on' : 'off'; r.dataset.contrast = s.highContrast ? 'high' : 'normal'; r.dataset.focus = s.focusStrong ? 'strong' : 'normal';
   r.style.setProperty('--card', `${s.card}px`); r.style.setProperty('--scale', s.scale / 100);
+  paintSkin(skinDraft || activeSkin()); dynId = null;
+}
+
+// ---------------- racing wheel (see app/wheels.js) ----------------
+// EchoForge learns the wheel once: which axis steers, which are the pedals and which buttons to use. The browser
+// reads the wheel like any controller (it shows up after one of its buttons is pressed).
+const WHEEL_STEPS = [
+  { k: 'steer', kind: 'steer', text: 'Turn the wheel to the left, then to the right (a quarter turn each way is enough).' },
+  { k: 'throttle', kind: 'pedal', text: 'Press the throttle (gas) pedal all the way down, then let go.' },
+  { k: 'brake', kind: 'pedal', text: 'Press the brake pedal all the way down, then let go.' },
+  { k: 'clutch', kind: 'pedal', text: 'Press the clutch pedal all the way down, then let go.', skip: 'No clutch' },
+  { k: 'cross', kind: 'button', text: 'Press the wheel button you want as Cross ✕ (Xbox A).', skip: 'Skip' },
+  { k: 'circle', kind: 'button', text: 'Press the button you want as Circle ○ (Xbox B).', skip: 'Skip' },
+  { k: 'square', kind: 'button', text: 'Press the button you want as Square □ (Xbox X).', skip: 'Skip' },
+  { k: 'triangle', kind: 'button', text: 'Press the button you want as Triangle △ (Xbox Y).', skip: 'Skip' },
+  { k: 'start', kind: 'button', text: 'Press the button you want as Start (pause).', skip: 'Skip' },
+  { k: 'select', kind: 'button', text: 'Press the button you want as Select.', skip: 'Skip' },
+  { k: 'shift_up', kind: 'button', text: 'Pull the right shift paddle (shift up).', skip: 'Skip' },
+  { k: 'shift_down', kind: 'button', text: 'Pull the left shift paddle (shift down).', skip: 'Skip' },
+  { k: 'dpad_up', kind: 'dpad', text: 'Press UP on the wheel’s D-pad.', skip: 'No D-pad' },
+  { k: 'dpad_down', kind: 'dpad', text: 'Press DOWN on the wheel’s D-pad.', skip: 'Skip' },
+  { k: 'dpad_left', kind: 'dpad', text: 'Press LEFT on the wheel’s D-pad.', skip: 'Skip' },
+  { k: 'dpad_right', kind: 'dpad', text: 'Press RIGHT on the wheel’s D-pad.', skip: 'Skip' }
+];
+let wheelCal = null;
+// Which games support wheels (app/wheelgames.js). Listed PS3 / PS2 games use the wheel unless you turned it off.
+const WG = window.EF_WHEELGAMES;
+const wheelSupport = g => WG.support(g.console, g.title);
+const wheelOn = g => g.wheel ?? (wheelSupport(g) === 'yes' && WG.connected(g.console));
+// Xbox 360 (Xenia) has no wheel emulation: there the wheel is handed over as an Xbox controller (see wheels.js padMapping).
+const WHEEL_PAD_CONSOLES = ['x360'];
+const wheelUsable = c => WG.connected(c) || WHEEL_PAD_CONSOLES.includes(c);
+const wheelGames = () => S.games.filter(g => !g.hidden && WG.connected(g.console) && wheelSupport(g) === 'yes').sort((a, b) => tt(a).localeCompare(tt(b)));
+const wheelPad = () => [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.connected && isWheel(g)) || null;
+function wheelStart() { wheelCal = { step: 0, found: { buttons: {} }, id: '', note: '' }; wheelStep(); render(); requestAnimationFrame(wheelPoll); }
+function wheelStep() { const gp = wheelPad(); if (!wheelCal) return; if (gp && wheelCal.waitHat != null && Math.abs(gp.axes[wheelCal.waitHat]) <= 1.01) { setTimeout(wheelStep, 60); return; } wheelCal.waitHat = null; wheelCal.rest = gp ? [...gp.axes] : null; wheelCal.lo = wheelCal.rest && [...wheelCal.rest]; wheelCal.hi = wheelCal.rest && [...wheelCal.rest]; wheelCal.btn = gp ? gp.buttons.map(b => b.pressed) : null; wheelCal.moving = null; }
+function wheelNext() { wheelCal.step++; if (wheelCal.step >= WHEEL_STEPS.length) return wheelFinish(); wheelStep(); render(); }
+function wheelSay(t) { const el = $('#wheelNote'); if (el && el.textContent !== t) el.textContent = t; }
+function wheelPoll() {
+  if (!wheelCal) return; requestAnimationFrame(wheelPoll);
+  const gp = wheelPad();
+  if (!gp) return wheelSay('Press any button on your wheel so EchoForge can see it.');
+  if (!wheelCal.id) { wheelCal.id = gp.id; wheelStep(); render(); return; }
+  if (!wheelCal.rest) { wheelStep(); return; }
+  const st = WHEEL_STEPS[wheelCal.step], f = wheelCal.found;
+  // Axes already used, and the d-pad (which the browser reports as an axis resting outside -1..1) are left out.
+  const used = new Set([f.steer, f.throttle && f.throttle.axis, f.brake && f.brake.axis, f.clutch && f.clutch.axis].filter(v => v != null));
+  const free = i => !used.has(i) && Math.abs(wheelCal.rest[i]) <= 1.01;
+  gp.axes.forEach((v, i) => { wheelCal.lo[i] = Math.min(wheelCal.lo[i], v); wheelCal.hi[i] = Math.max(wheelCal.hi[i], v); });
+  // Live meter: how far the most-moved free axis is from where it started, so you can see the wheel is being read.
+  const meter = $('#wheelMeter'); if (meter) { let best = 0; gp.axes.forEach((v, i) => { if (free(i)) best = Math.max(best, Math.abs(v - wheelCal.rest[i])); }); meter.style.width = Math.min(100, best * 50) + '%'; }
+  if (st.kind === 'steer') {
+    const i = gp.axes.findIndex((_, i) => free(i) && wheelCal.hi[i] - wheelCal.lo[i] > .6 && wheelCal.hi[i] > wheelCal.rest[i] + .2 && wheelCal.lo[i] < wheelCal.rest[i] - .2);
+    if (i >= 0) { f.steer = i; return wheelNext(); }
+    return wheelSay('Waiting for the wheel to turn…');
+  }
+  if (st.kind === 'pedal') {
+    const i = gp.axes.findIndex((v, i) => free(i) && Math.abs(v - wheelCal.rest[i]) > .9);
+    if (i >= 0 && wheelCal.moving == null) wheelCal.moving = i;
+    if (wheelCal.moving != null) {
+      const m = wheelCal.moving;
+      if (Math.abs(gp.axes[m] - wheelCal.rest[m]) < .3) { f[st.k] = { axis: m, rest: wheelCal.rest[m] > 0 ? 1 : -1 }; return wheelNext(); }
+      return wheelSay('Got it. Now let the pedal go.');
+    }
+    return wheelSay('Waiting for the pedal…');
+  }
+  // D-pad: either a hat (the browser shows it as an axis resting outside -1..1) or ordinary buttons.
+  if (st.kind === 'dpad') {
+    const hat = gp.axes.findIndex((v, i) => Math.abs(wheelCal.rest[i]) > 1.01 && Math.abs(v - wheelCal.rest[i]) > .2);
+    if (hat >= 0) { f.buttons[st.k] = 'hat'; f.hatAxis = hat; wheelCal.waitHat = hat; return wheelNext(); }
+  }
+  const taken = new Set(Object.values(f.buttons));
+  const b = gp.buttons.findIndex((x, i) => x.pressed && !wheelCal.btn[i] && !taken.has(i));
+  wheelCal.btn = gp.buttons.map(x => x.pressed);
+  if (b >= 0) { f.buttons[st.k] = b; return wheelNext(); }
+  wheelSay('Waiting for a button…');
+}
+function wheelFinish() {
+  const f = wheelCal.found, m = /Vendor:\s*([0-9a-f]{4})\s*Product:\s*([0-9a-f]{4})/i.exec(wheelCal.id);
+  const name = wheelCal.id.replace(/\(.*\)/, '').trim() || 'Racing wheel';
+  wheelCal = null;
+  if (!m || f.steer == null) { render(); return toast('EchoForge couldn’t read that wheel’s details. Try Set up my wheel again.', 'bad'); }
+  set().wheel = { name, vid: m[1], pid: m[2], steer: f.steer, throttle: f.throttle || null, brake: f.brake || null, clutch: f.clutch || null, buttons: f.buttons, hatAxis: Number.isInteger(f.hatAxis) ? f.hatAxis : undefined };
+  save(); render(); toast(`<b>${esc(name)}</b> is set up. Turn on “Use racing wheel” on a PS3 or PS2 racing game’s page.`, 'ok');
+}
+function wheelPanelHTML() {
+  const w = set().wheel;
+  if (wheelCal) {
+    const st = WHEEL_STEPS[wheelCal.step];
+    return `<div class="wheelcal"><div class="small muted">Step ${wheelCal.step + 1} of ${WHEEL_STEPS.length}${wheelCal.id ? ` · ${esc(wheelCal.id.replace(/\(.*\)/, '').trim())}` : ''}</div>
+      <div class="wheeltext">${esc(wheelCal.id ? st.text : 'Press any button on your wheel so EchoForge can see it.')}</div>
+      <div class="wheelmeter" aria-hidden="true"><i id="wheelMeter"></i></div>
+      <div class="small" id="wheelNote" role="status"></div>
+      <div class="row" style="margin-top:12px">${wheelCal.id && st.skip ? `<button class="btn sm" data-act="wheelSkip">${esc(st.skip)}</button>` : ''}<button class="btn sm ghost" data-act="wheelCancel">Cancel</button></div></div>`;
+  }
+  if (!w) return `<div class="small muted" style="margin-bottom:10px">No wheel set up yet. Plug in and turn on your wheel, then press the button and follow the steps. It takes about a minute.</div><button class="btn primary" data-act="wheelSetup">Set up my wheel</button>`;
+  const ax = p => p ? `axis ${p.axis}` : 'none';
+  const dp = ['dpad_up', 'dpad_down', 'dpad_left', 'dpad_right'].map(k => (w.buttons || {})[k]), dpad = dp.every(v => v == null) ? 'no D-pad' : dp.every(v => v === 'hat') ? 'D-pad (hat)' : 'D-pad';
+  return `<div class="small" style="margin-bottom:10px"><b>${esc(w.name)}</b> · steering axis ${w.steer} · throttle ${ax(w.throttle)} · brake ${ax(w.brake)} · clutch ${ax(w.clutch)} · ${Object.keys(w.buttons || {}).filter(k => !k.startsWith('dpad_')).length} buttons · ${dpad}</div>
+    <div class="small muted" style="margin-bottom:10px">PS3 games use it as a Logitech G27 and PS2 games as a Logitech Driving Force, in games that support those wheels. Games on EchoForge’s list of wheel games use it automatically; for others, press “Use racing wheel” on the game’s page. Xbox 360 games can use it as an Xbox controller (steering on the stick, pedals on the triggers). PS4, PS5 and Xbox One emulators don’t support wheels yet.</div>
+    ${(() => { const list = wheelGames(); return `<div class="small" style="margin-bottom:10px"><b>Your wheel games:</b> ${list.length ? list.slice(0, 20).map(g => `<button class="linkbtn" data-act="openGame" data-arg="${g.id}">${esc(tt(g))}</button>`).join(', ') + (list.length > 20 ? ` and ${list.length - 20} more` : '') : 'none of your PS3 or PS2 games is on the list yet. Racing games such as Gran Turismo 4, 5 and 6, DiRT, GRID and Need for Speed Shift support wheels.'}</div>`; })()}
+    <div class="row"><button class="btn sm" data-act="wheelSetup">Set up again</button><button class="btn sm ghost" data-act="wheelRemove">Remove</button></div>`;
+}
+
+// ---------------- Home dashboards ----------------
+// A dashboard is a list of Home sections in order, a cover size and an optional skin to switch to.
+const HOME_SECTIONS = { hero: 'Continue playing', stats: 'Your numbers', recent: 'Jump back in', pinned: 'Pinned games', favorites: 'Favorites', added: 'Recently added', mostPlayed: 'Most played', unplayed: 'Never played', random: 'Something different', collections: 'Collections', consoles: 'Consoles', shelves: 'A row for each console' };
+const HOME_PRESETS = [
+  { id: 'classic', name: 'Classic', kind: 'preset', blurb: 'Everything at a glance: continue, numbers, shelves and consoles.', sections: ['hero', 'stats', 'recent', 'pinned', 'favorites', 'added', 'collections', 'consoles'], cards: 'normal', skin: '' },
+  { id: 'couch', name: 'Couch', kind: 'preset', blurb: 'Big covers for the TV and a controller.', sections: ['hero', 'pinned', 'recent', 'favorites', 'consoles'], cards: 'big', skin: '' },
+  { id: 'collector', name: 'Collector', kind: 'preset', blurb: 'Every console on its own shelf.', sections: ['stats', 'pinned', 'shelves', 'collections', 'mostPlayed'], cards: 'normal', skin: '' },
+  { id: 'minimal', name: 'Minimal', kind: 'preset', blurb: 'Just what you play.', sections: ['hero', 'pinned', 'favorites'], cards: 'normal', skin: '' },
+  { id: 'discover', name: 'Discover', kind: 'preset', blurb: 'Find something you haven’t played yet.', sections: ['hero', 'random', 'unplayed', 'added', 'collections'], cards: 'normal', skin: '' }
+];
+let homeDraft = null;
+const myLayouts = () => (set().layouts = Array.isArray(set().layouts) ? set().layouts : []);
+const findLayout = id => HOME_PRESETS.find(l => l.id === id) || myLayouts().find(l => l.id === id) || null;
+function homeLayout() { return findLayout(set().homeLayout) || HOME_PRESETS[0]; }
+const pinnedGames = () => (set().pinned || []).map(game).filter(g => g && !g.hidden);
+const layoutCore = l => ({ name: String(l.name || 'My dashboard').replace(/[<>]/g, '').trim().slice(0, 40) || 'My dashboard', sections: (l.sections || []).filter(k => HOME_SECTIONS[k]), cards: l.cards === 'big' ? 'big' : 'normal', skin: typeof l.skin === 'string' ? l.skin : '' });
+// Edit / Preview tabs for the customizers in Settings. Preview is a small live copy of Home.
+let custTab = 'edit';
+const custTabs = () => `<div class="subtabs" role="tablist"><button role="tab" class="${custTab === 'edit' ? 'on' : ''}" data-act="custTab" data-arg="edit">Edit</button><button role="tab" class="${custTab === 'preview' ? 'on' : ''}" data-act="custTab" data-arg="preview">Preview</button></div>`;
+const homePreview = layout => `<div class="hprev" aria-label="Preview of Home"><div class="hprev-inner">${V.home(null, layout)}</div></div>`;
+// Unsaved changes are dropped when you leave the page they were made on.
+function dropDrafts(keepTab) {
+  if (wheelCal && keepTab !== 'controller') wheelCal = null;
+  if (skinDraft && keepTab !== 'look') { skinDraft = null; applyLook(); }
+  if (homeDraft && keepTab !== 'home') homeDraft = null;
+  custTab = 'edit';
+}
+function homeEditorHTML() {
+  if (!homeDraft) { const L = homeLayout(); homeDraft = { ...L, sections: [...L.sections], from: L.id }; }
+  const d = homeDraft, all = [...HOME_PRESETS, ...myLayouts()];
+  const order = [...d.sections, ...Object.keys(HOME_SECTIONS).filter(k => !d.sections.includes(k))];
+  const skins = [forgeAsSkin(), ...SK.PRESETS.filter(p => p.id !== 'forge'), ...mySkins()];
+  const using = homeLayout().id;
+  const edit = `<div class="h2">Dashboards</div>
+    <div class="layouts">${all.map(l => `<div class="lcard ${d.from === l.id ? 'on' : ''}"><button class="lpick" data-act="homePick" data-arg="${esc(l.id)}"><b>${esc(l.name)}${using === l.id ? ' <span class="pill ok">In use</span>' : ''}</b><small>${esc(l.blurb || 'Your dashboard')}</small></button>${l.kind === 'custom' ? `<button class="x" data-act="homeDelete" data-arg="${esc(l.id)}" title="Remove this dashboard" aria-label="Remove ${esc(l.name)}">×</button>` : ''}</div>`).join('')}</div>
+    <div class="h2">Sections</div>
+    <div class="hsecs">${order.map(k => { const i = d.sections.indexOf(k), lit = i >= 0;
+      return `<div class="hsec ${lit ? '' : 'off'}"><input type="checkbox" class="toggle" data-hsec="${k}" ${lit ? 'checked' : ''} aria-label="Show ${esc(HOME_SECTIONS[k])}"><span class="grow">${esc(HOME_SECTIONS[k])}</span>${lit ? `<button class="btn sm ghost" data-act="homeMove" data-arg="${k}:-1" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button><button class="btn sm ghost" data-act="homeMove" data-arg="${k}:1" ${i === d.sections.length - 1 ? 'disabled' : ''} title="Move down">▼</button>` : ''}</div>`; }).join('')}</div>
+    <div class="skinedit">
+      <label>Cover size on Home<select class="input" data-hfield="cards"><option value="normal" ${d.cards !== 'big' ? 'selected' : ''}>Normal</option><option value="big" ${d.cards === 'big' ? 'selected' : ''}>Big (for the TV)</option></select></label>
+      <label>Skin for this dashboard<select class="input" data-hfield="skin"><option value="">Keep my current skin</option>${skins.map(sk => `<option value="${esc(sk.id)}" ${d.skin === sk.id ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}</select></label>
+      <label>Name<input class="input" data-hfield="name" value="${esc(d.name)}" maxlength="40"></label>
+    </div>`;
+  return `${custTabs()}${custTab === 'preview' ? homePreview(d) : edit}
+    <div class="foot"><button class="btn ghost" data-act="homeUndo">Undo changes</button><button class="btn" data-act="homeSaveNew">Save as a new dashboard</button><button class="btn primary" data-act="homeUse">Use this dashboard</button></div>`;
+}
+function useLayout(id, skin) {
+  set().homeLayout = id; if (skin && SK.find(skin, mySkins()) || skin === 'forge') set().skin = skin;
+  homeDraft = null; save(); applyLook(); render();
+}
+
+// ---------------- skins (see app/skins.js) ----------------
+const SK = window.EF_SKINS;
+const SKIN_VARS = ['--a1', '--a2', '--a3', '--bg', '--bg2', '--panel', '--panel-solid', '--display', '--font', '--cut', '--rad', '--bw', '--bstyle', '--text', '--muted', '--faint', '--line', '--line2'];
+// The EchoForge skin's own colors, for its preview card: Accent swatch + Background setting.
+const THEME_RAMPS = { ember: ['#ffd27a', '#ff6a1f', '#e5145f'], glacier: ['#c9f3ff', '#3fc3ff', '#4c5cff'], verdant: ['#e9ff9a', '#4fdc6b', '#0f9d8a'], amethyst: ['#ffc9f4', '#b066ff', '#5b3cff'], solar: ['#fff3a8', '#ffc21f', '#ff7a1f'], mono: ['#ffffff', '#c9c9d1', '#7a7a86'] };
+const MODE_BGS = { dark: ['#0b0c10', '#101117'], oled: ['#000000', '#000000'], light: ['#efebe7', '#e6e1dc'] };
+let skinDraft = null;
+const mySkins = () => (set().skins = Array.isArray(set().skins) ? set().skins : []);
+function activeSkin() { const id = set().skin; return id && id !== 'forge' ? SK.find(id, mySkins()) : null; }
+function forgeAsSkin() { const s = set(), [a1, a2, a3] = THEME_RAMPS[s.theme] || THEME_RAMPS.ember, [bg, bg2] = MODE_BGS[s.mode] || MODE_BGS.dark; return { id: 'forge', name: 'EchoForge', kind: 'preset', a1, a2, a3, bg, bg2, light: s.mode === 'light', corners: 'cut', font: 'forge' }; }
+function paintSkin(sk) {
+  const r = document.documentElement;
+  for (const v of SKIN_VARS) r.style.removeProperty(v);
+  r.dataset.corners = sk ? sk.corners : 'cut'; r.dataset.skinshape = sk ? 'on' : 'off';
+  if (sk) { r.dataset.mode = sk.light ? 'light' : 'dark'; const vars = SK.cssVars(sk); for (const k in vars) r.style.setProperty(k, vars[k]); }
+  const wall = $('#bgWall'); if (!wall) return;
+  const src = sk && sk.wall;
+  if (!src) { wall.classList.remove('on'); wall.dataset.src = ''; return; }
+  r.style.setProperty('--wall-op', (sk.wallStrength ?? 35) / 100);
+  if (wall.dataset.src === src) { wall.classList.add('on'); return; }
+  wall.dataset.src = src;
+  cachedImage(src).then(d => { if (d && wall.dataset.src === src) { wall.style.backgroundImage = `url("${d}")`; wall.classList.add('on'); } });
+}
+// Colors of a picture: drawn small on a canvas, then read by SK.palette.
+const palCache = new Map();
+async function imagePalette(src) {
+  if (palCache.has(src)) return palCache.get(src);
+  const d = await cachedImage(src); if (!d) return null;
+  const img = new Image(); img.src = d; try { await img.decode(); } catch { return null; }
+  const c = document.createElement('canvas'); c.width = 48; c.height = 64;
+  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, 48, 64);
+  const p = SK.palette(x.getImageData(0, 0, 48, 64).data); palCache.set(src, p); return p;
+}
+// A skin's picture, made smaller, for a shared .efskin file.
+async function wallDataOf(src) {
+  const d = await cachedImage(src); if (!d) return null;
+  const img = new Image(); img.src = d; try { await img.decode(); } catch { return null; }
+  const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .85);
+}
+// Dynamic colors: the accent follows the game under the mouse or controller focus (stays on the last one).
+let dynT = null, dynId = null;
+document.addEventListener('focusin', e => dynFrom(e)); document.addEventListener('mouseover', e => dynFrom(e));
+function dynFrom(e) {
+  if (!set() || !set().dynColors || skinDraft) return;
+  const el = e.target.closest && e.target.closest('[data-play]'); if (!el || el.dataset.play === dynId) return;
+  clearTimeout(dynT);
+  dynT = setTimeout(async () => {
+    const g = game(el.dataset.play), src = g && (g.cover || g.icon); if (!src) return;
+    const p = await imagePalette(src); if (!p || !set().dynColors) return;
+    dynId = g.id; const r = document.documentElement; r.style.setProperty('--a1', p.a1); r.style.setProperty('--a2', p.a2); r.style.setProperty('--a3', p.a3);
+  }, 160);
+}
+function addSkin(sk, announce = true) {
+  const v = SK.validate(sk); if (!v) return toast('That skin’s colors aren’t valid.', 'bad');
+  set().skins = [...mySkins().filter(x => x.id !== v.id), v]; set().skin = v.id; save(); dynId = null; applyLook(); render();
+  if (announce) toast(`Skin <b>${esc(v.name)}</b> is on. Change it any time in Settings → Appearance.`, 'ok');
+}
+function skinCards(s) {
+  const cur = s.skin || 'forge', kinds = { preset: 'Built in', cover: 'From cover art', generated: 'Generated', custom: 'Your skin', imported: 'Added from a file' };
+  const all = [forgeAsSkin(), ...SK.PRESETS.filter(p => p.id !== 'forge'), ...mySkins()];
+  return `<div class="skins">${all.map(sk => `<div class="skincard ${cur === sk.id ? 'on' : ''}" style="--s1:${sk.a2};--s2:${sk.a3};--s3:${sk.a1};--sbg:${sk.bg};--sbg2:${sk.bg2}">
+      <button class="skinpick" data-act="skinUse" data-arg="${esc(sk.id)}" title="${esc(sk.name)}"><span class="sw">${sk.wall ? `<img data-img="${esc(sk.wall)}" alt="">` : ''}</span><b>${esc(sk.name)}</b><small>${kinds[sk.kind] || ''} · ${esc(SK.CORNER_NAMES[sk.corners] || '')}</small></button>
+      ${sk.kind !== 'preset' ? `<button class="x" data-act="skinDelete" data-arg="${esc(sk.id)}" title="Remove this skin" aria-label="Remove ${esc(sk.name)}">×</button>` : ''}</div>`).join('')}</div>
+    <div class="skinrow"><button class="btn sm primary" data-act="skinFromGame">${ico('wand')} From a game’s cover</button><button class="btn sm" data-act="skinSurprise">Surprise me</button><button class="btn sm" data-act="skinCustomize">Customize</button><button class="btn sm ghost" data-act="skinImport">Add a skin file</button>${cur !== 'forge' ? '<button class="btn sm ghost" data-act="skinExport">Share this skin</button>' : ''}</div>`;
+}
+let localFonts = null; // font families installed on this PC, for the "installed font" boxes
+async function loadLocalFonts() {
+  if (localFonts || !window.queryLocalFonts) return;
+  try { localFonts = [...new Set((await window.queryLocalFonts()).map(f => f.family))].filter(f => SK.FONT_NAME.test(f)).sort(); } catch { localFonts = []; }
+  const dl = $('#efFonts'); if (dl) dl.innerHTML = localFonts.map(f => `<option value="${esc(f)}">`).join('');
+}
+function skinEditorHTML() {
+  const d = skinDraft, light = !!d.light;
+  // Text, soft text and borders follow the light or dark defaults until you pick a color.
+  const dflt = { text: light ? '#1b1716' : '#f1ebe6', muted: light ? '#6c6360' : '#9a918c', line: light ? '#1b1716' : '#ffffff' };
+  const color = (k, l) => `<label>${l}<input type="color" data-skf="${k}" value="${d[k] || dflt[k]}"></label>`;
+  const select = (k, l, opts, cur) => `<label>${l}<select class="input" data-skf="${k}">${Object.entries(opts).map(([v, t]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+  const range = (k, l, min, max, step, cur, unit = '') => `<label>${l} <span class="mono" data-skv="${k}">${cur}${unit}</span><input type="range" min="${min}" max="${max}" step="${step}" data-skf="${k}" data-unit="${unit}" value="${cur}"></label>`;
+  const fontList = Object.fromEntries(Object.entries(SK.FONT_NAMES));
+  const fields = `<div class="skinedit"><label>Name<input class="input" data-skf="name" value="${esc(d.name)}" maxlength="40"></label>
+      <label>Light skin<input type="checkbox" class="toggle" data-skf="light" ${light ? 'checked' : ''}></label></div>
+    <div class="h2">Colors</div>
+    <div class="skinedit">${color('a2', 'Main color')}${color('a3', 'Second color')}${color('a1', 'Highlight')}${color('bg', 'Background')}${color('bg2', 'Panels')}${color('text', 'Text')}${color('muted', 'Soft text')}${color('line', 'Borders')}</div>
+    <div class="row"><button class="btn sm ghost" data-act="skinResetText">Use default text and border colors</button></div>
+    <div class="h2">Fonts</div>
+    <div class="skinedit">${select('font', 'Headings', fontList, d.font || 'forge')}<label>…or a font installed on this PC<input class="input" data-skf="fontCustom" list="efFonts" value="${esc(d.fontCustom || '')}" placeholder="Type a font name"></label>
+      ${select('bodyFont', 'Body text', fontList, d.bodyFont || 'segoe')}<label>…or a font installed on this PC<input class="input" data-skf="bodyCustom" list="efFonts" value="${esc(d.bodyCustom || '')}" placeholder="Type a font name"></label></div>
+    <datalist id="efFonts">${(localFonts || []).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+    <div class="h2">Borders and shape</div>
+    <div class="skinedit">${select('corners', 'Corners', SK.CORNER_NAMES, d.corners || 'cut')}${range('cornerSize', 'Corner size', 0, 30, 1, d.cornerSize ?? 14, 'px')}
+      ${select('borderStyle', 'Border style', SK.BORDER_STYLES, d.borderStyle || 'solid')}${range('border', 'Border thickness', 0, 4, 1, d.border ?? 1, 'px')}
+      ${range('panelAlpha', 'Panels see-through', 30, 100, 2, d.panelAlpha ?? 74, '%')}
+      ${d.wall ? range('wallStrength', 'Picture strength', 0, 90, 5, d.wallStrength ?? 35, '%') : ''}</div>
+    `;
+  setTimeout(loadLocalFonts, 0);
+  return `<div class="h2">Customize: ${esc(d.name)}</div><p class="muted small">Everything changes right away so you can see it. Nothing is saved until you press Save skin, and leaving this page drops unsaved changes.</p>
+    ${custTabs()}${custTab === 'preview' ? homePreview(homeLayout()) : fields}
+    <div class="foot"><button class="btn ghost" data-act="skinCancel">Cancel</button><button class="btn primary" data-act="skinSave">Save skin</button></div>`;
 }
 let bigpic = false;
 function setBigPicture(on) {
@@ -348,14 +603,22 @@ async function play(gid) {
       if (!go) return;
     }
   }
+  if (set().wheel && ((g.console === 'ps3' && emuId === 'rpcs3') || (g.console === 'ps2' && emuId === 'pcsx2'))) {
+    const r = g.console === 'ps3' ? await window.ef.wheels.rpcs3({ exe: emuPath('rpcs3'), profile: set().wheel, on: wheelOn(g) })
+      : await window.ef.wheels.pcsx2({ exe: emuPath('pcsx2'), profile: set().wheel, on: wheelOn(g), index: +set().wheelPcsx2Index || 0 });
+    if (r && r.ok && r.on) toast(`Racing wheel on for <b>${esc(tt(g))}</b>.`, 'ok'); else if (r && !r.ok) toast(`Couldn’t set up the wheel: ${esc(r.error)}`, 'bad');
+  }
   if (g.console === 'ps3' && emuId === 'rpcs3' && set().padAutoSetup && padState.ps3 && padState.ps3.state === 'missing') {
     const r = await window.ef.pads.setup({ exe: emuPath('rpcs3') });
     if (r.ok && r.kind) { toast(`Set up your ${esc(r.name)} for PS3 games.`, 'ok'); await checkBios('ps3'); }
   }
   blip('play');
   const res = c.launch === 'appx'
-    ? await window.ef.launchAppx({ manifest: g.path, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority })
-    : await window.ef.launch({ exe: emuPath(emuId), args: g.args || emuArgs(emuId), rom: g.path, core: conf.core, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority });
+    ? await window.ef.launchAppx({ manifest: g.path, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority, quitCombo: set().quitCombo, quitKey: set().quitKey, pauseMenu: set().pauseMenu, pauseKey: set().pauseKey, pauseFreeze: set().pauseFreeze, title: tt(g) })
+    : await window.ef.launch({ exe: emuPath(emuId), args: g.args || emuArgs(emuId), rom: g.path, core: conf.core, gameId: g.id,
+      // Wheel games: SDL 3.4's raw GameInput hides DirectInput wheels (like the Moza R5) from RPCS3, so it's turned off.
+      // Xbox 360: the wheel is handed to Xenia as an Xbox controller through an SDL controller mapping.
+      env: !set().wheel || !wheelOn(g) ? undefined : WHEEL_PAD_CONSOLES.includes(g.console) ? (await window.ef.wheels.padEnv({ profile: set().wheel })) || undefined : WG.connected(g.console) ? { SDL_JOYSTICK_GAMEINPUT_RAW: '0' } : undefined, onLaunch: set().onLaunch, priority: set().priority, quitCombo: set().quitCombo, quitKey: set().quitKey, pauseMenu: set().pauseMenu, pauseKey: set().pauseKey, pauseFreeze: set().pauseFreeze, title: tt(g), emuId });
   if (res.needsInstall) { blip('err'); return modal(`<h3>${esc(tt(g))} needs installing first</h3><p class="muted">${esc(res.error)}</p><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="guide">Open the Guide</button></div>`); }
   if (!res.ok) { blip('err'); return modal(`<h3>Couldn’t start the game</h3><div class="issue">${esc(res.error)}</div><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="emulators">Check emulator</button></div>`); }
   running = { gid: g.id, started: Date.now() };
@@ -369,6 +632,7 @@ function fixModal(c, issues) {
     ${issues.map(i => `<div class="issue ${i.lvl === 'warn' ? 'warn' : ''}"><div class="grow">${esc(i.text)}</div><button class="btn sm primary" data-act="go" data-arg="${i.fix}">${esc(i.label)}</button></div>`).join('')}
     <div class="foot"><button class="btn ghost" data-act="close">Close</button></div>`);
 }
+window.ef.onGameQuitting(({ gameId }) => { const g = game(gameId); $('#npText').textContent = `Closing ${g ? g.title : 'the game'}…`; toast(`Closing <b>${esc(g ? g.title : 'the game')}</b> so it can save…`); });
 window.ef.onGameExit(({ gameId, seconds, error }) => {
   const g = game(gameId); running = null;
   document.body.classList.remove('playing'); $('#np').classList.remove('on');
@@ -558,7 +822,7 @@ let lastSide = '', lastMain = '';
 // ---------------- views ----------------
 const V = {};
 
-V.home = () => {
+V.home = (_p, preview = null) => {
   const vis = S.games.filter(g => !g.hidden);
   const recent = vis.filter(g => g.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 12);
   const added = [...vis].sort((a, b) => b.added - a.added).slice(0, 12);
@@ -585,22 +849,34 @@ V.home = () => {
       <button class="btn primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : 'Update now'}</button><button class="btn ghost" data-act="url" data-arg="${esc(au.latest.page)}">What’s new</button><button class="btn ghost" data-act="appUpLater">Later</button></div>` : '';
   const guideCard = S.guideCard ? `<div class="panel glow guide-card"><div class="grow"><b>New here?</b><div class="small muted">The Guide walks you through everything step by step. Press F1 to open it any time.</div></div>
       <button class="btn primary" data-act="go" data-arg="guide">${ico('book')} Open the Guide</button><button class="btn ghost" data-act="tour">Take the tour</button><button class="btn ghost" data-act="guideCardClose" title="Hide this card">Close</button></div>` : '';
-  return `<div class="view">
-    ${heroHTML}
-    ${appCard}
-    ${guideCard}
-    <div class="stats">
+  const L = preview || homeLayout(), on = id => L.sections.includes(id);
+  const shelf = (title, list, extra = '') => list.length ? `<div class="h2">${title}${extra}</div><div class="shelf">${list.map(gameCard).join('')}</div>` : '';
+  const day = Math.floor(Date.now() / 864e5), mix = g => { let h = day; for (const ch of g.id) h = (h * 31 + ch.charCodeAt(0)) | 0; return h; }; // a new order each day, steady within the day
+  const parts = {
+    hero: heroHTML,
+    stats: `<div class="stats">
       <div class="panel stat"><div class="n">${vis.length}</div><div class="l">Games</div></div>
       <div class="panel stat"><div class="n">${readyCount}<span class="faint">/${enabledConsoles().length}</span></div><div class="l">Consoles ready</div></div>
       <div class="panel stat"><div class="n">${Math.round(totalTime / 3600)}<span class="faint"> h</span></div><div class="l">Played</div></div>
       <div class="panel stat"><div class="n">${favs.length}</div><div class="l">Favorites</div></div>
-    </div>
-    ${recent.length > 1 ? `<div class="h2">Jump back in</div><div class="shelf">${recent.slice(1).map(gameCard).join('')}</div>` : ''}
-    ${favs.length ? `<div class="h2">Favorites</div><div class="shelf">${favs.map(gameCard).join('')}</div>` : ''}
-    ${added.length ? `<div class="h2">Recently added</div><div class="shelf">${added.map(gameCard).join('')}</div>` : ''}
-    ${seriesData().list.length ? `<div class="h2">Collections <button class="btn sm ghost" data-act="go" data-arg="collections" style="margin-left:10px">See all</button></div><div class="shelf colls">${seriesData().list.slice(0, 12).map(seriesTile).join('')}</div>` : ''}
-    ${G.map(grp => { const cs = enabledConsoles().filter(c => c.group === grp.id); if (!cs.length) return '';
-      return `<div class="h2">${esc(grp.name)}</div><p class="sub small" style="margin-top:-6px">${esc(grp.blurb)}</p><div class="ctiles">${cs.map(consoleTile).join('')}</div>`; }).join('')}
+    </div>`,
+    recent: shelf('Jump back in', on('hero') ? recent.slice(1) : recent),
+    pinned: shelf('Pinned', pinnedGames()),
+    favorites: shelf('Favorites', favs),
+    added: shelf('Recently added', added),
+    mostPlayed: shelf('Most played', vis.filter(g => g.playtime > 0).sort((a, b) => b.playtime - a.playtime).slice(0, 12)),
+    unplayed: shelf('Never played', vis.filter(g => !g.lastPlayed).sort((a, b) => mix(a) - mix(b)).slice(0, 12)),
+    random: shelf('Something different', [...vis].sort((a, b) => mix(a) - mix(b)).slice(0, 12)),
+    collections: seriesData().list.length ? `<div class="h2">Collections <button class="btn sm ghost" data-act="go" data-arg="collections" style="margin-left:10px">See all</button></div><div class="shelf colls">${seriesData().list.slice(0, 12).map(seriesTile).join('')}</div>` : '',
+    consoles: G.map(grp => { const cs = enabledConsoles().filter(c => c.group === grp.id); if (!cs.length) return '';
+      return `<div class="h2">${esc(grp.name)}</div><p class="sub small" style="margin-top:-6px">${esc(grp.blurb)}</p><div class="ctiles">${cs.map(consoleTile).join('')}</div>`; }).join(''),
+    shelves: enabledConsoles().map(c => { const list = vis.filter(g => g.console === c.id).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0) || tt(a).localeCompare(tt(b))).slice(0, 14);
+      return shelf(esc(c.name), list, ` <button class="btn sm ghost" data-act="go" data-arg="console:${c.id}" style="margin-left:10px">See all</button>`); }).join('')
+  };
+  const body = L.sections.map(id => parts[id] || '');
+  if (!preview) body.splice(L.sections[0] === 'hero' ? 1 : 0, 0, appCard + guideCard); // notices sit under the big Continue panel
+  return `<div class="view home-${L.cards === 'big' ? 'big' : 'normal'}">
+    ${body.join('')}
   </div>`;
 };
 function consoleTile(c) {
@@ -1107,7 +1383,11 @@ const SETTINGS = [
     ['autoScan', 'Scan libraries on startup', 'Finds new games in your folders every time EchoForge opens.', 'toggle'],
     ['_wizard', 'Setup assistant', 'Walk through emulators, folders and firmware again.', 'button', 'Run setup']
   ] },
+  { id: 'home', name: 'Home dashboard', rows: [
+    ['_homeEditor', 'Your Home', 'Pick a ready-made dashboard or build your own: turn sections on or off, move them, choose the cover size and a skin to go with it. Use Preview to see it before you switch.', 'homeeditor']
+  ] },
   { id: 'look', name: 'Appearance', rows: [
+    ['skin', 'Skin', 'A skin sets the colors, background, headings font and corner style. Make one from any game’s cover art, let EchoForge invent one, or share yours as a file.', 'skins'],
     ['theme', 'Accent', 'The forge color used across the app.', 'swatch'],
     ['mode', 'Background', '', 'select', [['dark', 'Graphite (dark)'], ['oled', 'OLED black'], ['light', 'Light']]],
     ['card', 'Cover size', '', 'range', [130, 280, 2]],
@@ -1117,6 +1397,7 @@ const SETTINGS = [
     ['neon', 'Neon effect', 'Titles, headers and borders glow in your theme’s neon colors. Pauses while you play; follows Reduce motion.', 'select', NEON_EFFECTS],
     ['neonSpeed', 'Effect speed', 'Percent of normal speed.', 'range', [40, 250, 10]],
     ['bgArt', 'Highlighted game as background', 'The game under your mouse or controller fills the background, blurred, behind the glow.', 'toggle'],
+    ['dynColors', 'Colors follow the selected game', 'The accent colors change to match the cover of the game under your mouse or controller.', 'toggle'],
     ['bgBlur', 'Background blur', 'Pixels. 0 = sharp.', 'range', [0, 40, 2]],
     ['bgArtStrength', 'Background strength', 'Percent. Lower keeps text easier to read.', 'range', [10, 90, 5]],
     ['compact', 'Compact sidebar', 'Icons only.', 'toggle'],
@@ -1153,6 +1434,11 @@ const SETTINGS = [
     ['onLaunch', 'When a game starts', 'Getting the launcher out of the way frees GPU time for the game.', 'select', [['minimize', 'Minimize EchoForge'], ['hide', 'Hide EchoForge completely'], ['nothing', 'Do nothing']]],
     ['priority', 'Emulator CPU priority', 'Above normal is the sweet spot on a 6-core CPU. High can starve Windows audio.', 'select', [['normal', 'Normal'], ['above', 'Above normal (recommended)'], ['high', 'High']]],
     ['gameMode', 'Game mode', 'Pauses EchoForge animations, sounds and controller polling while you play.', 'toggle'],
+    ['quitCombo', 'Quit with Select + Start', 'Hold Select and Start together for 2 seconds (Share/Create + Options on PlayStation controllers, Back + Start on Xbox ones) to close the game and come back to EchoForge.', 'toggle'],
+    ['pauseMenu', 'In-game menu', 'Tap Select + Start together during a game (Share + Options on PlayStation, Back + Start on Xbox) to open EchoForge’s menu: resume, quick save and load, screenshot, controller check or quit. Holding them for 2 seconds still quits.', 'toggle'],
+    ['pauseKey', 'Menu shortcut', 'Keys that open the in-game menu. Example: Ctrl+Shift+P. Leave empty to turn it off.', 'text'],
+    ['pauseFreeze', 'Pause the game while the menu is open', 'EchoForge freezes the emulator until you pick Resume, so nothing happens in the game behind the menu.', 'toggle'],
+    ['quitKey', 'Quit shortcut', 'Keys that close the game and bring you back, even while the game has the screen. Example: Ctrl+Shift+Q. Leave empty to turn it off.', 'text'],
     ['ramGuard', 'Low-memory warning', 'Warns before launch if free RAM is below what the console needs.', 'toggle'],
     ['playtime', 'Track play time', '', 'toggle'],
     ['disableGpu', 'Software rendering for EchoForge', 'Only if the launcher itself glitches. Needs a restart.', 'toggle']
@@ -1161,7 +1447,9 @@ const SETTINGS = [
     ['gamepad', 'Navigate with a controller', 'D-pad / left stick moves, A selects, B goes back, Y favorites, LB/RB switch sections.', 'toggle'],
     ['padLabels', 'Button labels', '', 'select', [['xbox', 'Xbox (A B X Y)'], ['ps', 'PlayStation (✕ ○ □ △)']]],
     ['deadzone', 'Stick deadzone', '', 'range', [0.15, 0.7, 0.05]],
-    ['rumble', 'Rumble on select', '', 'toggle']
+    ['rumble', 'Rumble on select', '', 'toggle'],
+    ['_wheel', 'Racing wheel', 'Use a steering wheel and pedals in PS3 and PS2 racing games that support wheels.', 'wheel'],
+    ['wheelPcsx2Index', 'Wheel number in PCSX2', 'PCSX2 numbers controllers from 0. With one controller plus the wheel, the wheel is usually 1. If the wheel does nothing in PS2 games, try another number.', 'select', [['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']]]
   ] },
   { id: 'sound', name: 'Sound', rows: [
     ['sounds', 'Interface sounds', '', 'toggle'],
@@ -1194,8 +1482,12 @@ V.settings = () => {
     if (type === 'select') return `<select class="input" data-set="${k}">${opt.map(([v, l]) => `<option value="${v}" ${String(s[k]) === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (type === 'range') return `<div class="row"><input type="range" min="${opt[0]}" max="${opt[1]}" step="${opt[2]}" value="${s[k]}" data-set="${k}" data-num><span class="mono" style="width:44px">${s[k]}</span></div>`;
     if (type === 'text') return `<input class="input" style="width:280px" data-set="${k}" value="${esc(s[k])}">`;
-    if (type === 'swatch') return `<div class="swatches">${[['ember', '#ff6a1f,#e5145f'], ['glacier', '#3fc3ff,#4c5cff'], ['verdant', '#4fdc6b,#0f9d8a'], ['amethyst', '#b066ff,#5b3cff'], ['solar', '#ffc21f,#ff7a1f'], ['mono', '#c9c9d1,#7a7a86']].map(([n, g]) => `<button class="swatch ${s.theme === n ? 'on' : ''}" title="${n}" style="background:linear-gradient(135deg,${g})" data-act="theme" data-arg="${n}"></button>`).join('')}</div>`;
+    if (type === 'swatch') return `<div class="swatches">${[['ember', '#ff6a1f,#e5145f'], ['glacier', '#3fc3ff,#4c5cff'], ['verdant', '#4fdc6b,#0f9d8a'], ['amethyst', '#b066ff,#5b3cff'], ['solar', '#ffc21f,#ff7a1f'], ['mono', '#c9c9d1,#7a7a86']].map(([n, g]) => `<button class="swatch ${s.theme === n ? 'on' : ''}" title="${n}" style="background:linear-gradient(135deg,${g})" data-act="theme" data-arg="${n}"></button>`).join('')}<label class="anycolor" title="Any color"><input type="color" data-anyaccent value="${(THEME_RAMPS[s.theme] || THEME_RAMPS.ember)[1]}"><span>Any color</span></label></div>`;
     if (k === '_dlBack' && !s.dlPrevFolder) return '';
+    if ((k === 'theme' || k === 'mode') && (s.skin || 'forge') !== 'forge') return '<span class="small muted">Set by your skin. Pick the EchoForge skin to change it.</span>';
+    if (type === 'skins') return skinDraft ? skinEditorHTML() : skinCards(s);
+    if (type === 'homeeditor') return homeEditorHTML();
+    if (type === 'wheel') return wheelPanelHTML();
     if (type === 'button') return `<button class="btn" data-act="${k}">${esc(opt)}</button>`;
     if (type === 'danger') return `<button class="btn danger" data-act="${k}">${esc(opt)}</button>`;
     return '';
@@ -1206,7 +1498,7 @@ V.settings = () => {
     <div class="row">${appUp.info && appUp.info.ok && appUp.info.update ? `<button class="btn sm primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : `Update to ${esc(appUp.info.latest.version)}`}</button>` : ''}<button class="btn sm" data-act="appUpCheck" ${appUp.busy ? 'disabled' : ''}>Check for updates</button><button class="btn sm" data-act="openData">Open data folder</button></div></div></div>`;
   return `<div class="view"><h1 class="h1">Settings</h1><p class="sub">Every change saves instantly.</p>
     <div class="setwrap"><div class="setnav">${SETTINGS.map(x => `<button class="${x.id === setTab ? 'on' : ''}" data-act="stab" data-arg="${x.id}">${esc(x.name)}</button>`).join('')}</div>
-    <div class="panel">${setTab === 'about' ? about : sec.rows.map(r => { const help = r[0] === '_dlBack' ? dlHelp() : r[2]; return `<div class="setrow"><div class="lbl"><b>${esc(r[1])}</b>${help ? `<span>${esc(help)}</span>` : ''}</div>${ctl(r)}</div>`; }).join('')}</div></div></div>`;
+    <div class="panel">${setTab === 'about' ? about : sec.rows.map(r => { const help = r[0] === '_dlBack' ? dlHelp() : r[2]; return `<div class="setrow${r[3] === 'skins' || r[3] === 'homeeditor' || r[3] === 'wheel' ? ' col' : ''}"><div class="lbl"><b>${esc(r[1])}</b>${help ? `<span>${esc(help)}</span>` : ''}</div>${ctl(r)}</div>`; }).join('')}</div></div></div>`;
 };
 
 // ---------------- game details ----------------
@@ -1259,6 +1551,9 @@ V.game = (gid) => {
         <div class="row" style="margin-top:22px;gap:10px;flex-wrap:wrap">
           <button class="btn primary lg" data-act="play" data-arg="${g.id}" data-autofocus>${ico('play')} Play</button>
           <button class="btn lg ${g.fav ? 'primary' : 'ghost'}" data-act="fav" data-arg="${g.id}">${ico('star', 16)} ${g.fav ? 'Favorited' : 'Favorite'}</button>
+          <button class="btn lg ${(set().pinned || []).includes(g.id) ? 'primary' : 'ghost'}" data-act="pin" data-arg="${g.id}">${(set().pinned || []).includes(g.id) ? 'Pinned to Home' : 'Pin to Home'}</button>
+          ${set().wheel && wheelUsable(g.console) ? `<button class="btn lg ${wheelOn(g) ? 'primary' : 'ghost'}" data-act="wheelGame" data-arg="${g.id}" title="Uses your ${esc(set().wheel.name)} in this game">${wheelOn(g) ? 'Racing wheel on' : 'Use racing wheel'}</button>` : ''}
+          ${(() => { const ws = wheelSupport(g); return ws === 'yes' ? `<span class="pill ok" title="On EchoForge’s list of games that support racing wheels">Supports racing wheels${WG.connected(g.console) ? '' : ' · EchoForge can’t connect wheels for this console yet'}</span>` : ws === 'no' ? '<span class="pill warn" title="Logitech lists this game as not working with wheels">Doesn’t support wheels</span>' : WHEEL_PAD_CONSOLES.includes(g.console) && set().wheel && wheelOn(g) ? '<span class="pill info" title="Xenia has no wheel emulation, so the wheel is used as an Xbox controller">Wheel as a controller: steering on the stick, pedals on the triggers, no force feedback</span>' : ''; })()}
           ${k && k.url ? `<button class="btn lg ghost" data-act="url" data-arg="${esc(k.url)}">Tester report</button>` : ''}</div>
         ${(k && k.tips || []).map(t => `<div class="small muted" style="margin-top:8px">Tip: ${esc(t)}</div>`).join('')}
       </div>
@@ -1272,7 +1567,7 @@ V.game = (gid) => {
 function gameManage(g, c, conf, s) {
   const names = [...new Set(seriesData().list.map(x => x.name))];
   return `<div class="setrow"><div class="lbl"><b>Name</b><span>Shown as “${esc(tt(g))}”.</span></div><input class="input" style="width:320px" data-gtitle="${g.id}" value="${esc(g.title)}"></div>
-    <div class="setrow"><div class="lbl"><b>Cover</b><span>${g.cover ? (g.artAuto ? 'Found online.' : 'Your own picture.') : g.icon ? 'The game’s own icon.' : 'None yet.'}</span></div><div class="row"><button class="btn sm" data-act="pickCover" data-arg="${g.id}">Change cover</button>${g.cover ? `<button class="btn sm ghost" data-act="resetCover" data-arg="${g.id}">Reset</button>` : `<button class="btn sm ghost" data-act="findArt" data-arg="${g.id}">Find cover online</button>`}</div></div>
+    <div class="setrow"><div class="lbl"><b>Cover</b><span>${g.cover ? (g.artAuto ? 'Found online.' : 'Your own picture.') : g.icon ? 'The game’s own icon.' : 'None yet.'}</span></div><div class="row"><button class="btn sm" data-act="pickCover" data-arg="${g.id}">Change cover</button>${g.cover || g.icon ? `<button class="btn sm ghost" data-act="skinMake" data-arg="${g.id}">Make a skin</button>` : ''}${g.cover ? `<button class="btn sm ghost" data-act="resetCover" data-arg="${g.id}">Reset</button>` : `<button class="btn sm ghost" data-act="findArt" data-arg="${g.id}">Find cover online</button>`}</div></div>
     <div class="setrow"><div class="lbl"><b>Collection</b><span>${g.series === '-' ? 'Kept out of collections.' : s ? `In ${esc(s.name)} (${s.games.length} games)${g.series ? '' : ', found automatically'}.` : 'Not in a collection.'} Type a name to move it, “-” to keep it out, or clear it to go back to automatic.</span></div>
       <input class="input" style="width:220px" list="seriesNames" data-gseries="${g.id}" value="${esc(g.series || '')}" placeholder="${esc(s && !g.series ? s.name : 'Automatic')}"><datalist id="seriesNames">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist></div>
     ${c.launch === 'appx' ? '' : `<div class="setrow"><div class="lbl"><b>Emulator for this game</b></div><select class="input" data-gemu="${g.id}"><option value="">Section default (${esc(emuFor(conf.emulator).name)})</option>${c.emulators.map(id => `<option value="${id}" ${g.emu === id ? 'selected' : ''}>${esc(emuFor(id).name)}</option>`).join('')}</select></div>
@@ -1367,7 +1662,7 @@ const ACT = {
   openGame: (id) => openGame(id),
   back: () => leaveGame(),
   shot: async (p) => { const d = await cachedImage(p); if (d) modal(`<img src="${d}" alt="" style="display:block;width:100%;border-radius:8px;image-rendering:auto"><div class="foot"><button class="btn ghost" data-act="close" data-autofocus>Close</button></div>`, { wide: true }); },
-  stopGame: async () => { if (!set().confirmStop || await confirmBox('Stop the game?', 'Unsaved progress in the emulator will be lost.', 'Stop game', true)) window.ef.stop(); },
+  stopGame: async () => { if (!set().confirmStop || await confirmBox('Quit the game?', 'EchoForge asks the emulator to close so it can save, then brings you back here. Progress since your last in-game save may still be lost.', 'Quit game', true)) window.ef.stop(); },
   fav: (id) => { const g = game(id); g.fav = !g.fav; save(); openGame(id); render(); },
   hide: (id) => { const g = game(id); g.hidden = !g.hidden; save(); closeModal(); render(); renderSide(); toast(g.hidden ? 'Game hidden. Show it again from Settings → Library.' : 'Game visible again.'); },
   rmGame: async (id) => { const g = game(id); if (await confirmBox('Remove from library?', `“${esc(tt(g))}” is removed from EchoForge. The file on disk is <b>not</b> deleted, and a rescan brings it back.`, 'Remove', true)) { S.games = S.games.filter(x => x.id !== id); save(); if (route.view === 'game') leaveGame(); else render(); renderSide(); } },
@@ -1383,11 +1678,92 @@ const ACT = {
     S.games = S.games.filter(x => x.id !== id); save(); toast(`${esc(tt(g))} is in the Recycle Bin. ${fmtSize(r.bytes)} moved out of your library.`, 'ok');
     if (route.view === 'game') leaveGame(); else render(); renderSide();
   },
+  skinUse: (id) => { set().skin = id; save(); dynId = null; applyLook(); render(); },
+  skinDelete: async (id) => {
+    const sk = mySkins().find(x => x.id === id); if (!sk) return;
+    if (!await confirmBox(`Remove ${sk.name}?`, 'The skin is removed from EchoForge. Your games and covers aren’t touched.', 'Remove', true)) return;
+    set().skins = mySkins().filter(x => x.id !== id); if (set().skin === id) set().skin = 'forge'; save(); applyLook(); render();
+  },
+  skinSurprise: () => { const sk = SK.generate(); sk.name = 'Surprise ' + (mySkins().filter(x => x.kind === 'generated').length + 1); addSkin(sk); },
+  skinFromGame: () => {
+    const list = S.games.filter(g => !g.hidden && (g.cover || g.icon)).sort((a, b) => tt(a).localeCompare(tt(b)));
+    modal(`<h3>Make a skin from a game</h3><p class="muted">EchoForge takes the colors from the game’s cover and uses its art as the background.</p>
+      <input class="input" id="skQ" placeholder="Search your games" style="width:100%;margin-bottom:12px" data-autofocus>
+      <div class="skinpicker">${list.map(g => `<button data-act="skinMake" data-arg="${g.id}" data-title="${esc(tt(g).toLowerCase())}" title="${esc(tt(g))}"><img data-img="${esc(g.cover || g.icon)}" alt=""><span>${esc(tt(g))}</span></button>`).join('')}</div>
+      <div class="foot"><button class="btn ghost" data-act="close">Cancel</button></div>`, { wide: true });
+    const box = $('#modal .skinpicker'); if (box) hydrateImages(box);
+  },
+  skinMake: async (gid) => {
+    const g = game(gid); if (!g) return;
+    const p = await imagePalette(g.cover || g.icon); if (!p) return toast('Couldn’t read that game’s cover.', 'bad');
+    closeModal();
+    addSkin({ id: 'cover-' + g.id, name: tt(g).slice(0, 40), kind: 'cover', ...p, corners: 'cut', font: 'forge', wall: backdropOf(g), wallStrength: 35, gameId: g.id });
+  },
+  skinCustomize: () => {
+    const base = activeSkin() || forgeAsSkin();
+    skinDraft = { ...base, kind: 'custom' };
+    if (base.kind === 'preset') { skinDraft.id = 'custom-' + Date.now().toString(36); skinDraft.name = base.name + ' (mine)'; }
+    custTab = 'edit'; setTab = 'look'; applyLook(); if (route.view !== 'settings') go('settings'); else render();
+    setTimeout(() => { const e = $('.subtabs'); if (e) e.scrollIntoView({ block: 'start' }); }, 30);
+  },
+  skinResetText: () => { if (!skinDraft) return; delete skinDraft.text; delete skinDraft.muted; delete skinDraft.line; applyLook(); render(); },
+  skinCancel: () => { skinDraft = null; custTab = 'edit'; applyLook(); render(); },
+  custTab: (t) => { custTab = t; render(); },
+  skinSave: () => { const d = skinDraft; if (!d) return; skinDraft = null; custTab = 'edit'; addSkin(d); },
+  skinImport: async () => {
+    const r = await window.ef.skins.importSkin(); if (!r) return;
+    if (r.error) return toast(esc(r.error), 'bad');
+    const sk = SK.validate({ ...r, kind: 'imported', wall: undefined, gameId: undefined }); if (!sk) return toast('That skin’s colors aren’t valid.', 'bad');
+    if (SK.PRESETS.some(p => p.id === sk.id) || mySkins().some(x => x.id === sk.id)) sk.id = 'imp-' + Date.now().toString(36);
+    if (SK.validWallData(r.wallData)) sk.wall = await window.ef.skins.saveWall({ id: sk.id, data: r.wallData }) || undefined;
+    addSkin(sk);
+  },
+  skinExport: async () => {
+    const sk = activeSkin(); if (!sk) return toast('Pick a skin first. The EchoForge skin follows your Accent and Background settings.');
+    const { wall, gameId, ...data } = sk; data.kind = 'imported';
+    if (wall) { const d = await wallDataOf(wall); if (d) data.wallData = d; }
+    const f = await window.ef.skins.exportSkin(data); if (f) toast(`Saved <b>${esc(f)}</b>. Anyone with EchoForge can add it with “Add a skin file”.`, 'ok');
+  },
+  homeEdit: () => { dropDrafts(); setTab = 'home'; go('settings'); },
+  homeUndo: () => { homeDraft = null; render(); },
+  homePick: (id) => { const l = findLayout(id); if (!l) return; homeDraft = { ...l, sections: [...l.sections], from: l.id }; render(); },
+  homeMove: (arg) => { const [k, dir] = arg.split(':'), a = homeDraft && homeDraft.sections; if (!a) return; const i = a.indexOf(k), j = i + +dir; if (i < 0 || j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; render(); },
+  homeDelete: async (id) => {
+    const l = myLayouts().find(x => x.id === id); if (!l) return;
+    if (!await confirmBox(`Remove ${l.name}?`, 'This dashboard is removed. Your games aren’t touched.', 'Remove', true)) return;
+    set().layouts = myLayouts().filter(x => x.id !== id); if (set().homeLayout === id) set().homeLayout = 'classic';
+    if (homeDraft && homeDraft.from === id) homeDraft = null; save(); render();
+  },
+  homeSaveNew: () => {
+    const d = homeDraft; if (!d) return; const src = findLayout(d.from), core = layoutCore(d);
+    if (src && core.name === src.name) core.name = `${src.name} (mine)`;
+    const id = 'home-' + Date.now().toString(36); set().layouts = [...myLayouts(), { ...core, id, kind: 'custom', blurb: '' }];
+    useLayout(id, core.skin); toast(`Saved the <b>${esc(core.name)}</b> dashboard.`, 'ok');
+  },
+  homeUse: () => {
+    const d = homeDraft; if (!d) return; const src = findLayout(d.from), core = layoutCore(d);
+    const changed = !src || JSON.stringify(layoutCore(src)) !== JSON.stringify(core);
+    if (!changed) return useLayout(src.id, core.skin);
+    if (src && src.kind === 'custom') { set().layouts = myLayouts().map(l => l.id === src.id ? { ...l, ...core } : l); return useLayout(src.id, core.skin); }
+    ACT.homeSaveNew();
+  },
+  wheelSetup: () => wheelStart(),
+  wheelSkip: () => { if (wheelCal) wheelNext(); },
+  wheelCancel: () => { wheelCal = null; render(); },
+  wheelRemove: async () => { if (!await confirmBox('Remove the racing wheel?', 'EchoForge forgets the wheel’s layout and turns the emulated wheel off in RPCS3 and PCSX2 the next time you play.', 'Remove', true)) return; set().wheel = null; save(); render(); },
+  wheelGame: (id) => {
+    const g = game(id); g.wheel = !wheelOn(g); save(); openGame(id); render();
+    const ws = wheelSupport(g);
+    if (!g.wheel) return toast('Racing wheel off for this game.', 'ok');
+    if (WHEEL_PAD_CONSOLES.includes(g.console)) return toast('The wheel will work as an Xbox controller in this game: steering on the left stick, throttle and brake on the triggers. Turn your other controller off so the game uses the wheel.', 'ok');
+    toast(ws === 'yes' ? 'The racing wheel will be on when this game starts.' : ws === 'no' ? 'Logitech lists this game as not working with wheels, so it will probably ignore yours.' : 'This game isn’t on EchoForge’s list of wheel games, so it may ignore the wheel. Worth a try.', ws === 'yes' ? 'ok' : 'bad');
+  },
+  pin: (id) => { const s = set(), list = (s.pinned = Array.isArray(s.pinned) ? s.pinned : []); const i = list.indexOf(id); if (i >= 0) list.splice(i, 1); else list.unshift(id); save(); openGame(id); render(); toast(i >= 0 ? 'Unpinned from Home.' : 'Pinned to Home.', 'ok'); },
   pickCover: async (id) => { const f = await window.ef.pickFile({ title: 'Choose cover image', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }] }); if (f) { game(id).cover = f; save(); openGame(id); render(); } },
   resetCover: (id) => { const g = game(id); if (g.artAuto) g.noArt = true; delete g.cover; delete g.artAuto; save(); openGame(id); render(); },
   findArt: async (id) => { const g = game(id); delete g.noArt; g.artTried = 0; toast('Looking for a cover…'); const n = await fetchMissingArt(true); toast(game(id).cover ? 'Cover found.' : 'No cover found for this game. Use “Change cover” to pick one.', game(id).cover ? 'ok' : ''); if (n || game(id).cover) openGame(id); },
   libConsole: (id) => { lib.console = id; render(); }, libFav: () => { lib.fav = !lib.fav; render(); }, libLayout: (l) => { lib.layout = l; render(); },
-  ctab: (t) => { consoleTab = t; render(); }, stab: (t) => { setTab = t; render(); },
+  ctab: (t) => { consoleTab = t; render(); }, stab: (t) => { dropDrafts(t); setTab = t; render(); },
   tune: (cid) => { consoleTab = 'tuning'; go('console', cid); },
   showFix: (cid) => fixModal(byId(C, cid), health(cid).issues),
   scanConsole: async (cid) => { toast(`Scanning ${esc(byId(C, cid).name)}…`); await scanConsole(cid); renderSide(); render(); },
@@ -1585,6 +1961,10 @@ document.addEventListener('change', async (ev) => {
   }
   if (el.dataset.shtool) { if (el.checked) share.toolPicked.add(el.dataset.shtool); else share.toolPicked.delete(el.dataset.shtool); render(); return; }
   if (el.dataset.shpick) { if (el.checked) share.picked.add(el.dataset.shpick); else share.picked.delete(el.dataset.shpick); render(); return; }
+  if (el.dataset.skf && skinDraft) { const k = el.dataset.skf; skinDraft[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' ? +el.value : el.value; const lab = $(`[data-skv="${k}"]`); if (lab) lab.textContent = el.value + (el.dataset.unit || ''); applyLook(); return; }
+  if (el.dataset.hsec && homeDraft) { const k = el.dataset.hsec, a = homeDraft.sections; if (el.checked && !a.includes(k)) a.push(k); if (!el.checked) homeDraft.sections = a.filter(x => x !== k); render(); return; }
+  if (el.dataset.hfield && homeDraft) { homeDraft[el.dataset.hfield] = el.value; return; }
+  if (el.dataset.anyaccent !== undefined) { const [h, sat, l] = SK.rgbToHsl(...SK.hexToRgb(el.value)), base = forgeAsSkin(); addSkin({ ...base, id: 'accent-' + el.value.slice(1), name: 'My color ' + el.value.toUpperCase(), kind: 'custom', a2: el.value, a1: SK.hslToHex(h + 12, Math.max(sat, .6), Math.max(.8, l)), a3: SK.hslToHex(h - 32, Math.max(sat, .6), Math.min(l, .5)) }); return; }
   if (el.dataset.set) {
     const k = el.dataset.set; const v = el.type === 'checkbox' ? el.checked : el.dataset.num !== undefined ? +el.value : el.value;
     set()[k] = v; save(); applyLook();
@@ -1611,6 +1991,8 @@ document.addEventListener('change', async (ev) => {
 document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.id === 'guideQ') return filterGuide(el.value);
+  if (el.id === 'skQ') { const q = el.value.trim().toLowerCase(); for (const b of $$('#modal .skinpicker button')) b.style.display = !q || b.dataset.title.includes(q) ? '' : 'none'; return; }
+  if (el.dataset.skf && skinDraft) { const k = el.dataset.skf; skinDraft[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' ? +el.value : el.value; const lab = $(`[data-skv="${k}"]`); if (lab) lab.textContent = el.value + (el.dataset.unit || ''); applyLook(); return; }
   if (el.type === 'range' && el.dataset.set) { set()[el.dataset.set] = +el.value; el.nextElementSibling && (el.nextElementSibling.textContent = el.value); applyLook(); save(); }
   if (el.dataset.sh) { if (el.dataset.sh === 'q') { share.q = el.value; const at = el.selectionStart; render(); const n = $('#shQ'); if (n) { n.focus(); n.setSelectionRange(at, at); } } else { set()[el.dataset.sh] = el.value; share.error = ''; save(); } }
   if (el.id === 'q') { lib.q = el.value; if (route.view !== 'library' && route.view !== 'console') { go('library'); setTimeout(() => { $('#q').focus(); }, 0); } else render(); }
@@ -1619,6 +2001,7 @@ document.addEventListener('input', (ev) => {
 // ---------------- routing ----------------
 let keepSeries = false; // only "open collection" keeps the library filtered; the All Games button shows everything
 function go(view, param = null) {
+  if (view !== 'settings') dropDrafts();
   if (view === 'library' && !keepSeries) lib.series = ''; keepSeries = false;
   if (view !== route.view || param !== route.param) { if (view === 'console' && route.param !== param && consoleTab !== 'tuning') consoleTab = 'games'; }
   route = { view, param }; S.lastView = view === 'console' ? `console:${param}` : view; save();
@@ -1656,7 +2039,13 @@ function focusables() {
 }
 function moveFocus(dir) {
   const list = focusables(); const cur = document.activeElement && list.includes(document.activeElement) ? document.activeElement : null;
-  if (!cur) { const first = $('.game', $('#modal .modal') || $('#main')) || list[0]; first && first.focus(); return; }
+  // Nothing highlighted yet: start where you'd expect. A game's page starts on Play, not on a cover further down.
+  if (!cur) {
+    const box = $('#modal .modal') || $('#main');
+    const first = $('[data-autofocus]', box) || (!$('#modal .modal') && route.view === 'game' && $('#main [data-act="play"]')) || $('.game', box) || list[0];
+    if (first) { first.focus({ preventScroll: true }); first.scrollIntoView({ block: 'nearest' }); blip('move'); }
+    return;
+  }
   const a = cur.getBoundingClientRect(); const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
   let best = null, bestScore = Infinity;
   for (const el of list) {
@@ -1668,14 +2057,48 @@ function moveFocus(dir) {
   }
   if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: set().motion === 'full' ? 'smooth' : 'auto' }); blip('move'); }
 }
-const pad = { prev: {}, next: 0 };
+const pad = { prev: {}, next: 0, rest: {} };
+// Racing wheels, pedals and shifters show up as game controllers too, but their axes rest at the ends (a pedal
+// that isn't pressed reads -1 or +1), which looks like a stick held hard over. The menus never use them.
+const isWheel = gp => /wheel|pedal|shifter|moza|346e|fanatec|0eb7|thrustmaster|044f|simagic|simucube|\bg2[79]\b|g9[22]0|g923|driving force/i.test(gp.id);
+// Controllers the menus listen to: proper gamepads first (the browser maps them to the standard layout), any other
+// non-wheel controller only when no proper one is connected, and then only axes that rest near the middle.
+function menuPads() {
+  const all = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(gp => gp && gp.connected && !isWheel(gp));
+  const std = all.filter(gp => gp.mapping === 'standard');
+  return std.length ? std : all;
+}
+// The set-up wheel as a menu controller: button(i) answers for standard gamepad button i (0 ✕, 1 ○, 2 □, 3 △,
+// 4/5 shift paddles, 8 Select, 9 Start, 12-15 D-pad) from the wheel's learned buttons and its hat. The browser
+// reports a hat as an axis: up -1, then clockwise in steps of 2/7, and about 1.29 when nothing is pressed.
+const WHEEL_MENU = { 0: 'cross', 1: 'circle', 2: 'square', 3: 'triangle', 4: 'shift_down', 5: 'shift_up', 8: 'select', 9: 'start', 12: 'dpad_up', 13: 'dpad_down', 14: 'dpad_left', 15: 'dpad_right' };
+function wheelForMenus() {
+  const w = set().wheel; if (!w || wheelCal) return null;
+  const gp = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.connected && isWheel(g) && new RegExp(`Vendor:\\s*${w.vid}\\s*Product:\\s*${w.pid}`, 'i').test(g.id));
+  if (!gp) return null;
+  const hatAxis = Number.isInteger(w.hatAxis) ? w.hatAxis : gp.axes.length - 1, hv = gp.axes[hatAxis];
+  const hat = hv === undefined || hv > 1.1 || hv < -1.1 ? -1 : Math.round((hv + 1) / (2 / 7)) % 8; // 0 up, 2 right, 4 down, 6 left
+  const hatDir = { 12: [7, 0, 1], 13: [3, 4, 5], 14: [5, 6, 7], 15: [1, 2, 3] };
+  return { gp, button: i => {
+    const k = WHEEL_MENU[i]; if (!k) return false;
+    const v = (w.buttons || {})[k];
+    if (Number.isInteger(v)) return !!(gp.buttons[v] && gp.buttons[v].pressed);
+    if (hatDir[i] && (v === 'hat' || v == null)) return hat >= 0 && hatDir[i].includes(hat);
+    return false;
+  } };
+}
 function padLoop() {
   requestAnimationFrame(padLoop);
   if (!set() || !set().gamepad || (running && set().gameMode) || !document.hasFocus()) return;
-  const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean); if (!p) return;
-  const b = i => !!(p.buttons[i] && p.buttons[i].pressed); const dz = set().deadzone;
+  const pads = menuPads(), whl = wheelForMenus();
+  if (!pads.length && !whl) return;
+  for (const gp of pads) if (!pad.rest[gp.id + gp.index]) pad.rest[gp.id + gp.index] = gp.mapping === 'standard' ? gp.axes.map(() => 0) : [...gp.axes];
+  // A set-up racing wheel joins in with its D-pad and the buttons learned for it (never its steering or pedals).
+  const b = i => pads.some(gp => gp.buttons[i] && gp.buttons[i].pressed) || (whl ? whl.button(i) : false); const dz = set().deadzone;
+  const ax = (i, sign) => pads.some(gp => { const r = pad.rest[gp.id + gp.index][i] || 0; return Math.abs(r) < 0.3 && (gp.axes[i] - r) * sign > dz; });
+  const p = pads[0] || whl.gp;
   const now = performance.now();
-  const dirs = { up: b(12) || p.axes[1] < -dz, down: b(13) || p.axes[1] > dz, left: b(14) || p.axes[0] < -dz, right: b(15) || p.axes[0] > dz };
+  const dirs = { up: b(12) || ax(1, -1), down: b(13) || ax(1, 1), left: b(14) || ax(0, -1), right: b(15) || ax(0, 1) };
   const held = Object.keys(dirs).find(k => dirs[k]);
   if (held) { if (pad.held !== held || now > pad.next) { moveFocus(held); pad.next = now + (pad.held === held ? 110 : 320); pad.held = held; } } else pad.held = null;
   const edge = i => { const v = b(i), was = pad.prev[i]; pad.prev[i] = v; return v && !was; };
@@ -1692,7 +2115,11 @@ function padLoop() {
     const [v, prm] = order[i].split(':'); go(v, prm || null);
   }
 }
-window.addEventListener('gamepadconnected', (e) => { if (set() && set().gamepad) toast(`Controller connected: ${esc(e.gamepad.id.replace(/\(.*\)/, '').trim())}`, 'ok'); });
+window.addEventListener('gamepadconnected', (e) => {
+  if (!set() || !set().gamepad) return;
+  const name = esc(e.gamepad.id.replace(/\(.*\)/, '').trim() || 'Controller');
+  toast(isWheel(e.gamepad) ? (set().wheel ? `Racing wheel connected: ${name}. Its D-pad and buttons work in EchoForge’s menus.` : `Racing wheel connected: ${name}. Set it up in Settings → Controller → Racing wheel to use it here and in games.`) : `Controller connected: ${name}`, 'ok');
+});
 
 // ---------------- boot ----------------
 (async function boot() {

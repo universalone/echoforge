@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>EchoForge menu</title>
+<style>
+  :root { --a1: #ffd27a; --a2: #ff6a1f; --a3: #e5145f; --bg: #0b0c10; --bg2: #101117; --panel-solid: #16171f; --text: #f1ebe6; --muted: #9a918c; --line2: rgba(255,255,255,.13);
+    --display: 'Bahnschrift', 'Segoe UI', sans-serif; --font: 'Segoe UI', sans-serif; --grad: linear-gradient(115deg, var(--a1), var(--a2) 48%, var(--a3)); }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 16px/1.4 var(--font); color: var(--text); user-select: none; }
+  .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .62); display: grid; place-items: center; opacity: 0; transition: opacity .18s; }
+  .scrim.on { opacity: 1; }
+  .menu { width: min(520px, 90vw); background: color-mix(in srgb, var(--panel-solid) 94%, transparent); border: 1px solid var(--line2); padding: 30px 30px 24px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .6), 0 0 40px color-mix(in srgb, var(--a2) 25%, transparent);
+    clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px); }
+  .kicker { font: 600 12px var(--display); letter-spacing: .3em; text-transform: uppercase; color: var(--a2); }
+  h1 { margin: 6px 0 4px; font: 700 28px var(--display); letter-spacing: .04em; text-transform: uppercase; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .items { display: flex; flex-direction: column; gap: 6px; }
+  .item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 12px 16px; border: 1px solid transparent; background: var(--bg2); color: var(--text);
+    font: 600 16px var(--display); letter-spacing: .06em; text-transform: uppercase; text-align: left; cursor: pointer; }
+  .item small { font: 400 12px var(--font); letter-spacing: 0; text-transform: none; color: var(--muted); }
+  .item.sel { border-color: var(--a2); background: color-mix(in srgb, var(--a2) 22%, var(--bg2)); box-shadow: 0 0 18px color-mix(in srgb, var(--a2) 30%, transparent); }
+  .item.off { opacity: .45; cursor: default; }
+  .item.danger.sel { border-color: #ff5470; background: color-mix(in srgb, #ff5470 22%, var(--bg2)); }
+  .msg { min-height: 20px; margin-top: 14px; font-size: 13px; color: var(--a1); }
+  .hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="scrim" id="scrim"><div class="menu" role="menu" aria-label="Game menu">
+  <div class="kicker" id="kicker">Paused</div>
+  <h1 id="title"></h1>
+  <div class="sub" id="sub"></div>
+  <div class="items" id="items"></div>
+  <div class="msg" id="msg" role="status"></div>
+  <div class="hint">D-pad or arrows to move · Cross / A / Enter to choose · Circle / B / Esc to go back to the game</div>
+</div></div>
+<script src="overlay.js"></script>
+</body>
+</html>

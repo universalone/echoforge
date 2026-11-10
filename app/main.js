@@ -1,5 +1,7 @@
 // EchoForge — main process: splash, window, storage, scanning, firmware checks, hardware probe, launching.
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
+const quit = require('./quit');
+const pauseMenu = require('./pausemenu');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -114,6 +116,30 @@ ipcMain.handle('store:export', async (_e, data) => {
   const r = await dialog.showSaveDialog(win, { title: 'Back up EchoForge', defaultPath: `echoforge-backup-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'EchoForge backup', extensions: ['json'] }] });
   if (r.canceled) return false;
   await fsp.writeFile(r.filePath, JSON.stringify(data, null, 1)); return r.filePath;
+});
+// Skins (see app/skins.js): a .efskin file is JSON with colors and an optional picture, never code.
+ipcMain.handle('skin:export', async (_e, data) => {
+  const name = String((data && data.name) || 'skin').replace(/[^\w -]/g, '').trim() || 'skin';
+  const r = await dialog.showSaveDialog(win, { title: 'Share this skin', defaultPath: `${name}.efskin`, filters: [{ name: 'EchoForge skin', extensions: ['efskin'] }] });
+  if (r.canceled) return false;
+  await fsp.writeFile(r.filePath, JSON.stringify({ echoforgeSkin: 1, ...data })); return r.filePath;
+});
+ipcMain.handle('skin:import', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Add a skin', properties: ['openFile'], filters: [{ name: 'EchoForge skin', extensions: ['efskin', 'json'] }] });
+  if (r.canceled) return null;
+  try {
+    const st = await fsp.stat(r.filePaths[0]); if (st.size > 9e6) return { error: 'That file is too big to be a skin.' };
+    const o = JSON.parse(await fsp.readFile(r.filePaths[0], 'utf8'));
+    return o && o.echoforgeSkin ? o : { error: 'That file isn’t an EchoForge skin.' };
+  } catch { return { error: 'That file isn’t an EchoForge skin.' }; }
+});
+// Saves a skin's picture into EchoForge's own folder: plain JPEG/PNG/WebP data only.
+ipcMain.handle('skin:saveWall', async (_e, { id, data }) => {
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(data || ''));
+  if (!m || !/^[\w-]{1,40}$/.test(String(id || '')) || m[2].length > 8.2e6) return null;
+  const dir = path.join(app.getPath('userData'), 'skins'); await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${id}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
+  await fsp.writeFile(file, Buffer.from(m[2], 'base64')); return file;
 });
 ipcMain.handle('store:import', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Restore EchoForge backup', properties: ['openFile'], filters: [{ name: 'EchoForge backup', extensions: ['json'] }] });
@@ -507,6 +533,9 @@ require('./share').register({ ipcMain, getWin: () => win, gameUnit });
 require('./emu-updates').register({ ipcMain, getWin: () => win });
 require('./app-updates').register({ ipcMain, app, getWin: () => win, isPlaying: () => !!running });
 require('./pads').register({ ipcMain });
+pauseMenu.register({ ipcMain });
+require('./wheels').register({ ipcMain });
+pauseMenu.init({ globalShortcut, getWin: () => win, getRunning: () => running, quitGame: s => quitGame(s) });
 
 // ---------- firmware / BIOS ----------
 function md5(file) {
@@ -610,13 +639,16 @@ ipcMain.handle('emu:launch', async (_e, req) => {
     child = spawn(req.exe, req.rom ? args : [], { cwd: path.dirname(req.exe), detached: false, windowsHide: false, env: { ...process.env, ...(req.env || {}) } });
   } catch (err) { return { ok: false, error: String(err.message || err) }; }
   const started = Date.now();
-  running = { child, gameId: req.gameId, started };
+  running = { child, gameId: req.gameId, started, title: req.title || '', emuId: req.emuId || '', freeze: req.pauseFreeze !== false };
   let errOut = '';
   child.stderr && child.stderr.on('data', d => { errOut = (errOut + d).slice(-2000); });
-  child.on('error', err => { win.webContents.send('game:exit', { gameId: req.gameId, seconds: 0, code: -1, error: err.message }); running = null; restoreWindow(); });
+  child.on('error', err => { pauseMenu.close({ front: false }); quit.disarm(globalShortcut); win.webContents.send('game:exit', { gameId: req.gameId, seconds: 0, code: -1, error: err.message }); running = null; restoreWindow(); });
+  armQuit(req);
   child.on('exit', code => {
     const seconds = Math.round((Date.now() - started) / 1000);
-    running = null;
+    const quitting = running && running.quitting;
+    pauseMenu.close({ front: false }); running = null; quit.disarm(globalShortcut);
+    if (quitting) code = 0; // closed on purpose, not a crash
     win.webContents.send('game:exit', { gameId: req.gameId, seconds, code, error: code && seconds < 5 ? (errOut.trim().split('\n').pop() || `Emulator closed with code ${code}`) : null });
     restoreWindow(req.restoreFullscreen);
   });
@@ -638,8 +670,9 @@ ipcMain.handle('appx:launch', async (_e, req) => {
   if (!pkg) return { ok: false, needsInstall: true, error: appx.notRegistered(m.title) };
   try { await appx.start(pkg, m.appId); } catch (err) { return { ok: false, error: String(err.message || err) }; }
   const started = Date.now(), gameId = req.gameId;
-  running = { child: null, gameId, started, pid: null };
-  const finish = (error) => { if (!running || running.gameId !== gameId) return; clearInterval(running.timer); running = null; win.webContents.send('game:exit', { gameId, seconds: Math.round((Date.now() - started) / 1000), code: error ? 1 : 0, error }); restoreWindow(); };
+  running = { child: null, gameId, started, pid: null, title: req.title || '', emuId: 'windurango', freeze: req.pauseFreeze !== false };
+  armQuit(req);
+  const finish = (error) => { if (!running || running.gameId !== gameId) return; clearInterval(running.timer); pauseMenu.close({ front: false }); running = null; quit.disarm(globalShortcut); win.webContents.send('game:exit', { gameId, seconds: Math.round((Date.now() - started) / 1000), code: error ? 1 : 0, error }); restoreWindow(); };
   // Wait up to a minute for the game to appear, then check every few seconds that it's still running.
   running.timer = setInterval(async () => {
     if (!running || running.gameId !== gameId) return;
@@ -656,12 +689,26 @@ ipcMain.handle('appx:launch', async (_e, req) => {
   return { ok: true };
 });
 function restoreWindow() { if (!win) return; if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); }
-ipcMain.handle('emu:stop', () => {
-  if (!running) return false;
-  if (running.child) { try { running.child.kill(); } catch {} }
-  else if (running.pid) { try { process.kill(running.pid); } catch {} }
-  return true;
-});
+// Quit to EchoForge (Stop button, keyboard shortcut or controller combo): ask the emulator to close so it can save,
+// force it only if it's still open after the grace period (see app/quit.js). The exit handlers bring EchoForge back.
+async function quitGame(source) {
+  if (!running || running.quitting) return false;
+  if (pauseMenu.isOpen()) pauseMenu.close({ front: false }); // lets a paused game run again so it can close
+  const r = running; r.quitting = true;
+  if (win && !win.isDestroyed()) win.webContents.send('game:quitting', { gameId: r.gameId, source });
+  const pid = r.child ? r.child.pid : r.pid;
+  if (!pid) { if (r.timer) { clearInterval(r.timer); running = null; quit.disarm(globalShortcut); win.webContents.send('game:exit', { gameId: r.gameId, seconds: Math.round((Date.now() - r.started) / 1000), code: 0, error: null }); restoreWindow(); } return true; }
+  const how = await quit.closeSafely(pid);
+  if (how === 'forced' && r.child && running === r) { try { r.child.kill(); } catch {} }
+  return how;
+}
+function armQuit(req) {
+  quit.arm({ globalShortcut, combo: req.quitCombo !== false, key: req.quitKey || '', menu: req.pauseMenu !== false, menuKey: req.pauseKey || '',
+    onQuit: source => quitGame(source), onMenu: () => (pauseMenu.isOpen() ? pauseMenu.close() : pauseMenu.open()), onNav: dir => pauseMenu.nav(dir),
+    onPads: n => { if (running) running.pads = n; } });
+}
+ipcMain.handle('emu:stop', () => quitGame('button'));
+app.on('will-quit', () => { quit.disarm(globalShortcut); try { globalShortcut.unregisterAll(); } catch {} });
 ipcMain.handle('emu:running', () => (running ? { gameId: running.gameId, started: running.started } : null));
 
 // Looks for known emulator executables in the usual places on every drive.

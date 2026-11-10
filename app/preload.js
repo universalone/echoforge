@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('ef', {
   },
   downloads: { status: invoke('downloads:status'), check: invoke('downloads:check'), set: invoke('downloads:set') },
   pads: { status: invoke('pads:status'), setup: invoke('pads:setup') },
+  wheels: { rpcs3: invoke('wheel:rpcs3'), pcsx2: invoke('wheel:pcsx2'), padEnv: invoke('wheel:padEnv') },
+  skins: { exportSkin: invoke('skin:export'), importSkin: invoke('skin:import'), saveWall: invoke('skin:saveWall') },
   appUpdates: {
     check: invoke('appup:check'),
     install: invoke('appup:install'),
@@ -81,5 +83,6 @@ contextBridge.exposeInMainWorld('ef', {
     fullscreen: (on) => ipcRenderer.send('win:fullscreen', on),
     onState: (fn) => ipcRenderer.on('win:state', (_e, v) => fn(v))
   },
-  onGameExit: (fn) => ipcRenderer.on('game:exit', (_e, v) => fn(v))
+  onGameExit: (fn) => ipcRenderer.on('game:exit', (_e, v) => fn(v)),
+  onGameQuitting: (fn) => ipcRenderer.on('game:quitting', (_e, v) => fn(v))
 });

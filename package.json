@@ -1,14 +1,14 @@
 {
   "name": "echoforge",
   "productName": "EchoForge",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "EchoForge - next-gen console emulation launcher",
   "author": "EchoForge contributors",
   "main": "app/main.js",
   "updateRepo": "universalone/echoforge",
   "scripts": {
     "start": "electron .",
-    "test": "node test/guide_test.js && node test/app_updates_test.js && node test/pads_test.js && node test/inbox_test.js && node test/appx_test.js && node test/emu_updates_test.js",
+    "test": "node test/guide_test.js && node test/app_updates_test.js && node test/pads_test.js && node test/quit_test.js && node test/skins_test.js && node test/wheels_test.js && node test/wheelgames_test.js && node test/inbox_test.js && node test/appx_test.js && node test/emu_updates_test.js",
     "dist": "electron-builder --win nsis",
     "postinstall": "node node_modules/electron/install.js"
   },
@@ -22,6 +22,7 @@
     "productName": "EchoForge",
     "copyright": "EchoForge contributors · GPL-3.0-or-later",
     "files": ["app/**/*", "package.json"],
+    "asarUnpack": ["app/padwatch.ps1", "app/sdlprobe.ps1"],
     "directories": { "output": "dist" },
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "app/assets/icon.ico" },
     "nsis": {
