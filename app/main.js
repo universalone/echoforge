@@ -2,6 +2,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
 const quit = require('./quit');
 const pauseMenu = require('./pausemenu');
+const synopsis = require('./synopsis');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -391,6 +392,8 @@ ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnit
     return { ok: true, path: out, name };
   } catch (e) { return { ok: false, reason: e.message }; }
 });
+
+synopsis.register(ipcMain); // game page synopsis from Wikipedia
 
 // Gameplay screenshot and title screen for the game page and backdrops, from the same library and matched the same way.
 ipcMain.handle('art:shots', async (_e, { id, console: cid, names }) => {

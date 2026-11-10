@@ -58,6 +58,7 @@ window.EF_GUIDE = [
     steps: [
       { text: 'All Games shows everything. Filter by console or Favorites, or search with Ctrl+F.', go: 'library' },
       { text: 'Choose Details on a game for its page: screenshots, play time, and Play, Favorite, Hide, Change cover and Show file.' },
+      { text: 'A game’s page also shows what the game is about, with its year, genre and developer, from Wikipedia. Wrong game or none found? Under Manage → Synopsis, type your own, press Look it up again, or press Wrong game.' },
       { text: 'Collections groups series EchoForge found across your consoles. On a game’s page you can move it into a collection or keep it out of one.', go: 'collections' },
       { text: 'Hidden games are left out of your lists. Show them again in Settings → Library → Show hidden games.' },
       { text: 'Remove takes a game off your list without touching its files. Recycle Bin sends its files to the Windows Recycle Bin, so you can still restore them.' }

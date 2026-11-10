@@ -37,7 +37,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
   wheel: null, wheelPcsx2Index: 1, skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
-  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, xboxUnityArt: false, gameTdbArt: false,
+  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
@@ -1411,6 +1411,7 @@ const SETTINGS = [
     ['storageRoot', 'Storage library root (hard drive)', 'Optional. PS3, Xbox 360 and older consoles (PS1, PS2, PSP, GameCube, Wii, Xbox) live here. Your PC → Game storage suggests moves.', 'text'],
     ['useRomDirs', 'Standard console folders', 'Creates a folder per console under the ROM library root and adds it to that console’s library.', 'button', 'Create & add folders'],
     ['autoArt', 'Download missing box art', 'Covers come from the libretro thumbnails library (the one RetroArch uses), Only console and game names are sent.', 'toggle'],
+    ['autoAbout', 'Download game synopses', 'A short summary, year, genre and developer for each game’s page, from Wikipedia and Wikidata. Only the game’s name is sent.', 'toggle'],
     ['xboxUnityArt', 'Xbox 360 covers from XboxUnity', 'A community cover database, used when libretro has no cover. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['gameTdbArt', 'PS3 covers from GameTDB', 'A community cover database with box art for most PS3 games, used in place of the small disc icon. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['compatCheck', 'Check which games run', 'Looks up PS3 games on RPCS3’s compatibility list and Xbox 360 games on Xenia Canary’s. Only the game’s disc ID is sent. Refreshed weekly.', 'toggle'],
@@ -1510,7 +1511,8 @@ function openGame(gid) {
   if (!game(gid)) return; closeModal();
   if (route.view === 'game' && route.param === gid) { render(); return; }
   if (route.view !== 'game') gameBack = { view: route.view, param: route.param, top: $('#main').scrollTop };
-  go('game', gid);
+  aboutOpen = false; go('game', gid);
+  if (set().autoAbout) fetchAbout(game(gid));
 }
 function leaveGame() {
   const b = gameBack || { view: 'home', param: null, top: 0 }; gameBack = null;
@@ -1531,6 +1533,36 @@ async function fetchMissingShots() {
   } finally { fetchingShots = false; }
   if (n) { save(); if (route.view === 'game') render(); }
   return n;
+}
+// Synopsis, year, genre and developer from Wikipedia (main process: app/synopsis.js). Misses are retried after 30 days.
+const aboutBusy = new Set();
+async function fetchAbout(g, force = false) {
+  if (!g || aboutBusy.has(g.id) || g.noAbout && !force) return null; // null = not looked up
+  if (!force && (g.about || (g.aboutTried && Date.now() - g.aboutTried < 30 * 864e5))) return null;
+  aboutBusy.add(g.id);
+  try {
+    const parts = g.path.split(/[\\/]/), base = parts[parts.length - 1].replace(/\.[^.]+$/, '').replace(/\.nkit$/i, '');
+    const r = await window.ef.fetchAbout({ names: [g.title, /^eboot$/i.test(base) ? '' : base], consoleName: byId(C, g.console).name });
+    g.aboutTried = Date.now();
+    if (r && r.ok) { g.about = { text: r.text, url: r.url, title: r.title, year: r.year, genre: r.genre, dev: r.dev, pub: r.pub }; delete g.noAbout; }
+    save(); if (route.view === 'game' && route.param === g.id) render();
+    return !!(r && r.ok);
+  } finally { aboutBusy.delete(g.id); }
+}
+let fetchingAbout = false;
+async function fetchMissingAbout() {
+  if (fetchingAbout || !set().autoAbout) return; fetchingAbout = true;
+  try { for (const g of [...S.games]) if (set().autoAbout && await fetchAbout(g) !== null) await new Promise(r => setTimeout(r, 250)); } finally { fetchingAbout = false; }
+}
+let aboutOpen = false; // "Read more" on the game page
+function aboutHTML(g) {
+  const a = g.about, own = g.aboutOwn, text = own || (a && a.text);
+  const facts = a && !g.noAbout ? [a.year, ...(a.genre || []), a.dev && a.dev.join(', '), a.pub && a.pub.join(', ') !== (a.dev || []).join(', ') ? a.pub.join(', ') : null].filter(Boolean) : [];
+  if (!text && !facts.length) return aboutBusy.has(g.id) ? '<div class="gp-about small muted">Looking up this game…</div>' : '';
+  const long = text && text.length > 320;
+  return `${facts.length ? `<div class="gp-facts">${facts.map(f => `<span>${esc(String(f).replace(/^./, ch => ch.toUpperCase()))}</span>`).join('')}</div>` : ''}
+    ${text ? `<div class="gp-about ${long && !aboutOpen ? 'clamp' : ''}">${text.split(/\n{2,}/).map(t => `<p>${esc(t)}</p>`).join('')}</div>
+    <div class="gp-aboutfoot small muted">${long ? `<button class="linkbtn" data-act="aboutMore">${aboutOpen ? 'Show less' : 'Read more'}</button>` : ''}${own ? '<span>Your own text</span>' : a ? `<button class="linkbtn" data-act="url" data-arg="${esc(a.url)}">From Wikipedia</button>` : ''}</div>` : ''}`;
 }
 V.game = (gid) => {
   const g = game(gid); if (!g) return V.home();
@@ -1556,6 +1588,7 @@ V.game = (gid) => {
           ${(() => { const ws = wheelSupport(g); return ws === 'yes' ? `<span class="pill ok" title="On EchoForge’s list of games that support racing wheels">Supports racing wheels${WG.connected(g.console) ? '' : ' · EchoForge can’t connect wheels for this console yet'}</span>` : ws === 'no' ? '<span class="pill warn" title="Logitech lists this game as not working with wheels">Doesn’t support wheels</span>' : WHEEL_PAD_CONSOLES.includes(g.console) && set().wheel && wheelOn(g) ? '<span class="pill info" title="Xenia has no wheel emulation, so the wheel is used as an Xbox controller">Wheel as a controller: steering on the stick, pedals on the triggers, no force feedback</span>' : ''; })()}
           ${k && k.url ? `<button class="btn lg ghost" data-act="url" data-arg="${esc(k.url)}">Tester report</button>` : ''}</div>
         ${(k && k.tips || []).map(t => `<div class="small muted" style="margin-top:8px">Tip: ${esc(t)}</div>`).join('')}
+        ${aboutHTML(g)}
       </div>
     </section>
     ${shots.length ? `<div class="h2">Screenshots</div><div class="gp-shots">${shots.map(p => `<button class="gp-shot" data-act="shot" data-arg="${esc(p)}"><img data-img="${esc(p)}" alt=""></button>`).join('')}</div>` : ''}
@@ -1568,6 +1601,9 @@ function gameManage(g, c, conf, s) {
   const names = [...new Set(seriesData().list.map(x => x.name))];
   return `<div class="setrow"><div class="lbl"><b>Name</b><span>Shown as “${esc(tt(g))}”.</span></div><input class="input" style="width:320px" data-gtitle="${g.id}" value="${esc(g.title)}"></div>
     <div class="setrow"><div class="lbl"><b>Cover</b><span>${g.cover ? (g.artAuto ? 'Found online.' : 'Your own picture.') : g.icon ? 'The game’s own icon.' : 'None yet.'}</span></div><div class="row"><button class="btn sm" data-act="pickCover" data-arg="${g.id}">Change cover</button>${g.cover || g.icon ? `<button class="btn sm ghost" data-act="skinMake" data-arg="${g.id}">Make a skin</button>` : ''}${g.cover ? `<button class="btn sm ghost" data-act="resetCover" data-arg="${g.id}">Reset</button>` : `<button class="btn sm ghost" data-act="findArt" data-arg="${g.id}">Find cover online</button>`}</div></div>
+    <div class="setrow col"><div class="lbl"><b>Synopsis</b><span>${g.aboutOwn ? 'Your own text. Clear it to go back to Wikipedia’s.' : g.about && !g.noAbout ? `From Wikipedia’s “${esc(g.about.title)}” article. Type your own to replace it.` : 'None yet. Type your own, or look it up on Wikipedia.'}</span></div>
+      <textarea class="input" rows="3" data-gabout="${g.id}" placeholder="${esc(g.about && !g.noAbout ? g.about.text.slice(0, 140) + '…' : 'Write a few lines about this game')}">${esc(g.aboutOwn || '')}</textarea>
+      <div class="row"><button class="btn sm ghost" data-act="findAbout" data-arg="${g.id}">${g.about && !g.noAbout ? 'Look it up again' : 'Look it up on Wikipedia'}</button>${g.about && !g.noAbout ? `<button class="btn sm ghost" data-act="aboutWrong" data-arg="${g.id}">Wrong game</button>` : ''}</div></div>
     <div class="setrow"><div class="lbl"><b>Collection</b><span>${g.series === '-' ? 'Kept out of collections.' : s ? `In ${esc(s.name)} (${s.games.length} games)${g.series ? '' : ', found automatically'}.` : 'Not in a collection.'} Type a name to move it, “-” to keep it out, or clear it to go back to automatic.</span></div>
       <input class="input" style="width:220px" list="seriesNames" data-gseries="${g.id}" value="${esc(g.series || '')}" placeholder="${esc(s && !g.series ? s.name : 'Automatic')}"><datalist id="seriesNames">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist></div>
     ${c.launch === 'appx' ? '' : `<div class="setrow"><div class="lbl"><b>Emulator for this game</b></div><select class="input" data-gemu="${g.id}"><option value="">Section default (${esc(emuFor(conf.emulator).name)})</option>${c.emulators.map(id => `<option value="${id}" ${g.emu === id ? 'selected' : ''}>${esc(emuFor(id).name)}</option>`).join('')}</select></div>
@@ -1758,6 +1794,9 @@ const ACT = {
     if (WHEEL_PAD_CONSOLES.includes(g.console)) return toast('The wheel will work as an Xbox controller in this game: steering on the left stick, throttle and brake on the triggers. Turn your other controller off so the game uses the wheel.', 'ok');
     toast(ws === 'yes' ? 'The racing wheel will be on when this game starts.' : ws === 'no' ? 'Logitech lists this game as not working with wheels, so it will probably ignore yours.' : 'This game isn’t on EchoForge’s list of wheel games, so it may ignore the wheel. Worth a try.', ws === 'yes' ? 'ok' : 'bad');
   },
+  aboutMore: () => { aboutOpen = !aboutOpen; render(); },
+  findAbout: async (id) => { const g = game(id); toast('Looking it up on Wikipedia…'); const ok = await fetchAbout(g, true); toast(ok ? 'Synopsis found.' : 'Wikipedia has no article that matches this game’s name. Check the name, or type your own.', ok ? 'ok' : ''); render(); },
+  aboutWrong: (id) => { const g = game(id); g.noAbout = true; delete g.about; save(); render(); toast('Removed. EchoForge won’t look this game up again unless you ask.', 'ok'); },
   pin: (id) => { const s = set(), list = (s.pinned = Array.isArray(s.pinned) ? s.pinned : []); const i = list.indexOf(id); if (i >= 0) list.splice(i, 1); else list.unshift(id); save(); openGame(id); render(); toast(i >= 0 ? 'Unpinned from Home.' : 'Pinned to Home.', 'ok'); },
   pickCover: async (id) => { const f = await window.ef.pickFile({ title: 'Choose cover image', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }] }); if (f) { game(id).cover = f; save(); openGame(id); render(); } },
   resetCover: (id) => { const g = game(id); if (g.artAuto) g.noArt = true; delete g.cover; delete g.artAuto; save(); openGame(id); render(); },
@@ -1985,6 +2024,7 @@ document.addEventListener('change', async (ev) => {
   if (el.dataset.manual) { const [cid, bid] = el.dataset.manual.split('.'); cc(cid).manual[bid] = el.checked; save(); renderSide(); render(); }
   if (el.dataset.gtitle) { const g = game(el.dataset.gtitle); g.title = el.value.trim() || g.title; g.renamed = true; save(); render(); }
   if (el.dataset.gemu !== undefined && el.dataset.gemu) { const g = game(el.dataset.gemu); g.emu = el.value || undefined; save(); }
+  if (el.dataset.gabout) { const g = game(el.dataset.gabout), v = el.value.trim(); if (v) g.aboutOwn = v.slice(0, 4000); else delete g.aboutOwn; save(); render(); }
   if (el.dataset.gargs) { const g = game(el.dataset.gargs); g.args = el.value.trim() || undefined; save(); }
   if (el.dataset.gseries) { const g = game(el.dataset.gseries), v = el.value.trim(); g.series = v || undefined; save(); renderSide(); render(); openGame(g.id); toast(v === '-' ? 'Kept out of collections.' : v ? `Moved to ${esc(v)}.` : 'Back to automatic.', 'ok'); }
 });
@@ -2148,7 +2188,7 @@ window.addEventListener('gamepadconnected', (e) => {
   if (!S.wizardDone) setTimeout(() => wizard(0), 2900);
   else if (set().autoScan) setTimeout(() => scanAll(true), 3200);
   setTimeout(checkCompat, set().autoScan ? 9000 : 2000); // after the startup scan has picked up new games
-  setTimeout(async () => { while (scanning || fetchingArt) await new Promise(r => setTimeout(r, 2000)); fetchMissingShots(); }, set().autoScan ? 12000 : 3000);
+  setTimeout(async () => { while (scanning || fetchingArt) await new Promise(r => setTimeout(r, 2000)); await fetchMissingShots(); fetchMissingAbout(); }, set().autoScan ? 12000 : 3000);
   // Backups default to the storage drive (a different drive from the emulators); the folder can be changed on the page.
   if (!trimRoot(set().backupRoot) && rootOf(set().storageRoot)) { set().backupRoot = rootOf(set().storageRoot) + 'EchoForge Backups'; save(); }
   if (set().backupWeekly && Date.now() - (set().backupLast || 0) > 7 * 864e5) setTimeout(() => { if (!running) backupSaves(null, 'weekly', true); }, 25000);

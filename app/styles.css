@@ -474,3 +474,14 @@ input[type=range] { accent-color: var(--a2); width: 200px; }
 #wheelNote { color: var(--a1); min-height: 18px; }
 .wheelmeter { height: 8px; margin: 10px 0 8px; background: var(--line); overflow: hidden; } .wheelmeter i { display: block; height: 100%; width: 0; background: var(--grad); transition: width .08s; }
 .linkbtn { border: 0; background: none; padding: 0; color: var(--a1); cursor: pointer; font: inherit; text-decoration: underline; }
+
+/* Game page synopsis (Wikipedia) */
+.gp-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 18px; font-size: 13px; color: var(--muted, rgba(255,255,255,.7)); }
+.gp-facts span + span::before { content: "·"; margin-right: 14px; opacity: .5; }
+.gp-about { max-width: 820px; margin-top: 10px; font-size: 15px; line-height: 1.55; text-shadow: 0 2px 12px rgba(0, 0, 0, .6); }
+.gp-about p { margin: 0 0 10px; }
+.gp-about.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.gp-about.clamp p:not(:first-child) { display: none; }
+.gp-aboutfoot { display: flex; gap: 16px; align-items: center; margin-top: 2px; }
+[data-bigpic="on"] .gp-about { font-size: 18px; }
+textarea.input { resize: vertical; min-height: 70px; font: inherit; line-height: 1.45; }

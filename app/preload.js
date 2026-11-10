@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('ef', {
   readText: invoke('fs:readText'),
   fetchArt: invoke('art:fetch'),
   fetchShots: invoke('art:shots'),
+  fetchAbout: invoke('about:fetch'),
   moveGame: invoke('game:move'),
   recycleInfo: invoke('game:recycleInfo'),
   recycleGame: invoke('game:recycle'),
