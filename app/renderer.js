@@ -37,7 +37,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
   wheel: null, wheelPcsx2Index: 1, skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
-  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'card', splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
+  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
@@ -72,6 +72,7 @@ function hydrate(raw) {
   const s = freshState();
   if (!raw) return s;
   s.settings = { ...DEFAULTS, ...(raw.settings || {}) };
+  if ((raw.settings || {}).splashSizeV !== 2) Object.assign(s.settings, { splashSize: 'hd', splashSizeV: 2 }); // the intro now opens at 1920 × 1080
   s.emulators = raw.emulators || {};
   for (const c of C) s.consoles[c.id] = { ...s.consoles[c.id], ...((raw.consoles || {})[c.id] || {}) };
   s.games = Array.isArray(raw.games) ? raw.games : [];
@@ -81,7 +82,15 @@ function hydrate(raw) {
   return s;
 }
 let saveT = null;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { window.ef.save(S); syncShare(); }, 350); }
+let saveWarned = 0;
+function save() {
+  clearTimeout(saveT);
+  saveT = setTimeout(async () => {
+    const ok = await window.ef.save(S); syncShare();
+    // A failed save (a full disk, a locked file) is reported, at most once a minute, instead of quietly losing changes.
+    if (ok === false && Date.now() - saveWarned > 60000) { saveWarned = Date.now(); toast('EchoForge couldn’t save your changes. Check that the drive isn’t full, then try again.', 'bad'); }
+  }, 350);
+}
 const set = () => (S ? S.settings : DEFAULTS);
 const cc = id => S.consoles[id];
 const game = id => S.games.find(g => g.id === id);
@@ -377,7 +386,7 @@ const palCache = new Map();
 async function imagePalette(src) {
   if (palCache.has(src)) return palCache.get(src);
   const d = await cachedImage(src); if (!d) return null;
-  const img = new Image(); img.src = d; try { await img.decode(); } catch { return null; }
+  const img = new Image(); img.crossOrigin = 'anonymous'; img.src = d; try { await img.decode(); } catch { return null; }
   const c = document.createElement('canvas'); c.width = 48; c.height = 64;
   const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, 48, 64);
   const p = SK.palette(x.getImageData(0, 0, 48, 64).data); palCache.set(src, p); return p;
@@ -385,7 +394,7 @@ async function imagePalette(src) {
 // A skin's picture, made smaller, for a shared .efskin file.
 async function wallDataOf(src) {
   const d = await cachedImage(src); if (!d) return null;
-  const img = new Image(); img.src = d; try { await img.decode(); } catch { return null; }
+  const img = new Image(); img.crossOrigin = 'anonymous'; img.src = d; try { await img.decode(); } catch { return null; }
   const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
   const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .85);
@@ -562,7 +571,7 @@ async function fetchMissingArt(force = false) {
     const folder = /^eboot$/i.test(base) ? cleanTitle(g.path, g.console).title : parts[parts.length - 2];
     const r = await window.ef.fetchArt({ id: g.id, console: g.console, names: [g.title, folder, base], file: g.path, xboxUnity: set().xboxUnityArt, gameTdb: set().gameTdbArt, titleId: g.titleId });
     g.artTried = Date.now();
-    if (r && r.ok) { imgCache.delete(r.path); g.cover = r.path; g.artAuto = true; n++; } // same file name may already be cached
+    if (r && r.ok) { forgetImage(r.path); g.cover = r.path; g.artAuto = true; n++; } // same file name may already be cached
   }
   fetchingArt = false;
   if (n) { save(); if (['home', 'library', 'console'].includes(route.view)) render(); }
@@ -737,7 +746,19 @@ function coverHTML(g, opts = {}) {
     ${opts.play !== false ? `<div class="playov"><span>${ico('play', 22)}</span></div>` : ''}
   </div>`;
 }
-async function cachedImage(p) { let d = imgCache.get(p); if (d === undefined) { d = await window.ef.readImage(p); imgCache.set(p, d); } return d; }
+// A picture's efimg:// address (small text; the browser keeps and frees the picture itself), or null when it's missing.
+// w: the width wanted (cards, mosaics and screenshot thumbnails get a smaller copy; backgrounds the full picture).
+const THUMB = 480;
+async function cachedImage(p, w = 0) { const k = w ? `${p}|${w}` : p; let d = imgCache.get(k); if (d === undefined) { d = await window.ef.imageUrl(p, w); imgCache.set(k, d); } return d; }
+const forgetImage = p => { imgCache.delete(p); imgCache.delete(`${p}|${THUMB}`); };
+// Chromium keeps every picture it has shown until told otherwise. After a page change (2 seconds after you stop moving
+// between pages, and at least every 15 seconds while you keep going) it lets go of pictures no longer on screen.
+// The ones on the page are read again from disk when needed, which is quick.
+let dropAt = Date.now(), dropT = null;
+function dropOldImages() {
+  const drop = () => { clearTimeout(dropT); dropT = null; dropAt = Date.now(); window.ef.dropImageMemory(); };
+  clearTimeout(dropT); dropT = setTimeout(drop, Date.now() - dropAt > 15000 ? 300 : 2000);
+}
 const imgWide = new Map(); // src -> wide-icon flag, learned on first load so redraws can lay the card out at once
 async function hydrateImages(root = document) {
   const imgs = $$('img[data-img]', root);
@@ -749,15 +770,15 @@ async function hydrateImages(root = document) {
   };
   // Images already seen are put in place in the same frame as the redraw, so cards don't blank and fade in again.
   for (const img of imgs) {
-    const p = img.dataset.img, bgP = img.dataset.bg, d = imgCache.get(p);
-    if (!d || !imgWide.has(p) || (bgP && imgCache.get(bgP) === undefined)) continue;
+    const p = img.dataset.img, bgP = img.dataset.bg, d = imgCache.get(`${p}|${THUMB}`);
+    if (!d || !imgWide.has(p) || (bgP && imgCache.get(`${bgP}|${THUMB}`) === undefined)) continue;
     img.removeAttribute('data-img'); img.style.transition = 'none'; img.style.opacity = 1; img.src = d;
-    place(img, d, bgP ? imgCache.get(bgP) : null, imgWide.get(p));
+    place(img, d, bgP ? imgCache.get(`${bgP}|${THUMB}`) : null, imgWide.get(p));
   }
   for (const img of imgs) {
     if (!img.dataset.img) continue;
     const p = img.dataset.img, bgP = img.dataset.bg; img.removeAttribute('data-img');
-    const d = await cachedImage(p), bd = bgP ? await cachedImage(bgP) : null;
+    const d = await cachedImage(p, THUMB), bd = bgP ? await cachedImage(bgP, THUMB) : null;
     if (d) { img.src = d; img.onload = () => {
       img.style.opacity = 1; const wide = img.naturalWidth > img.naturalHeight * 1.2; imgWide.set(p, wide); place(img, d, bd, wide);
     }; }
@@ -1090,13 +1111,20 @@ function inboxDest(cid) { // where a console's games land, and the other library
 }
 // A copy in progress changes the folder many times a second, so only redraw when what the inbox shows has changed.
 const inboxSig = () => JSON.stringify([inbox.error, inbox.cleaned.length, inbox.items.map(i => [i.file, i.status, i.console, i.error])]);
-let inboxRefreshing = false;
+let inboxRefreshing = false, inboxAgain = false;
+// Files are checked one at a time, so new games arrive one by one: they're added up and announced once, when the checking pauses.
+let freshCount = 0, freshT = null;
+function freshToast(n) {
+  freshCount += n; clearTimeout(freshT);
+  freshT = setTimeout(() => { if (route.view !== 'inbox') toast(`${freshCount} new game${freshCount === 1 ? '' : 's'} in Import, ready to add.`, 'ok'); freshCount = 0; }, 2500);
+}
 async function refreshInbox(quiet = true) {
-  const folder = inboxFolder(); if (!folder || inboxRefreshing) return;
+  const folder = inboxFolder(); if (!folder) return;
+  if (inboxRefreshing) { inboxAgain = true; return; } // a change while refreshing: look again right after, so nothing is missed
   if (inbox.busy) { clearTimeout(inboxT); inboxT = setTimeout(() => refreshInbox(quiet), 3000); return; } // finish the import first
   inboxRefreshing = true;
   const before = new Set(inboxReady().map(i => i.file)), sig = inboxSig();
-  const results = await Promise.all(inboxFolders().map(f => window.ef.inbox.scan(f))).finally(() => { inboxRefreshing = false; });
+  const results = await Promise.all(inboxFolders().map(f => window.ef.inbox.scan(f))).finally(() => { inboxRefreshing = false; if (inboxAgain) { inboxAgain = false; setTimeout(() => refreshInbox(quiet), 300); } });
   const r = results[0] || {}; // a folder that's gone or empty is no error
   inbox.items = results.flatMap(x => x.items || []); inbox.error = r.error || null; inbox.loaded = true;
   if (set().inboxAutoClean) for (const it of inbox.items.filter(i => i.status === 'risky' && i.auto)) {
@@ -1106,7 +1134,7 @@ async function refreshInbox(quiet = true) {
   }
   inbox.items = inbox.items.filter(i => !inbox.cleaned.some(c => c.name === i.name && i.status === 'risky' && !i.error));
   const fresh = inboxReady().filter(i => !before.has(i.file)).length;
-  if (fresh && !quiet && route.view !== 'inbox') toast(`${fresh} new game${fresh === 1 ? '' : 's'} in Import, ready to add.`, 'ok');
+  if (fresh && !quiet && route.view !== 'inbox') freshToast(fresh);
   clearTimeout(inboxT); if (inbox.items.some(i => i.status === 'copying')) inboxT = setTimeout(() => refreshInbox(false), 16000);
   if (inboxSig() === sig && !inbox.dirty) return;
   inbox.dirty = false; renderSide(); if (route.view === 'inbox') render();
@@ -1118,6 +1146,7 @@ async function importItem(file) {
   inbox.busy = file; delete inbox.failed[file]; inbox.progress[file] = { pct: 0, phase: 'Starting' }; render();
   const r = await window.ef.inbox.import({ file, o: { dest, fallback, minFreeGB: set().inboxMinFree, keepFreeGB: set().dlAutoSwitch ? set().dlSwitchAtGB : 0, rpcs3: emuPath('rpcs3'), recycle: set().inboxRecycle } });
   inbox.busy = null; delete inbox.progress[file];
+  if (r.cancelled) inbox.stopping = true; // Cancel also stops the rest of Add all
   if (!r.ok) { inbox.failed[file] = r.error; render(); return null; }
   // Make sure the folder the game landed in is one the console scans (RPCS3's own folder for installed PS3 packages).
   const lib = r.libFolder || [dest, fallback].find(f => f && (r.dest + '\\').toLowerCase().startsWith(f.toLowerCase() + '\\')) || dest;
@@ -1127,8 +1156,10 @@ async function importItem(file) {
   return it.console;
 }
 async function importAll(files) {
-  const touched = new Set();
-  for (const f of files) { const cid = await importItem(f); if (cid) touched.add(cid); }
+  const touched = new Set(); inbox.stopping = false;
+  for (const f of files) { if (inbox.stopping) break; const cid = await importItem(f); if (cid) touched.add(cid); }
+  if (inbox.stopping) toast('Stopped. Anything half-unpacked was removed, and the rest are still here to add later.');
+  inbox.stopping = false;
   for (const cid of touched) await scanConsole(cid, true);
   if (touched.size) { fetchMissingArt().then(fetchMissingShots); checkCompat(); toast('Added to your library. Covers are on their way.', 'ok'); }
   await refreshInbox(); renderSide(); render();
@@ -1144,7 +1175,7 @@ V.inbox = () => {
   const chip = cid => { const c = byId(C, cid); return `<span class="chip" style="background:linear-gradient(140deg,${c.hue[0]},${c.hue[1]})">${esc(c.short)}</span>`; };
   const row = it => {
     const { dest } = inboxDest(it.console), p = inbox.progress[it.file], err = inbox.failed[it.file];
-    const right = p ? `<div style="width:220px"><div class="meter"><i style="width:${p.pct}%"></i></div><div class="small muted ph" style="margin-top:4px">${esc(p.phase || '')} · ${p.pct}%</div></div>`
+    const right = p ? `<div style="width:220px"><div class="meter"><i style="width:${p.pct}%"></i></div><div class="small muted ph" style="margin-top:4px">${esc(p.phase || '')} · ${p.pct}%</div></div><button class="btn sm ghost" data-act="ibCancel" ${inbox.stopping ? 'disabled' : ''}>${inbox.stopping ? 'Stopping…' : 'Cancel'}</button>`
       : `<button class="btn sm primary" data-act="ibAdd" data-arg="${esc(it.file)}" ${inbox.busy ? 'disabled' : ''}>Add</button>`;
     return `<div class="folder" id="ib-${hashId(it.file)}">${chip(it.console)}<span class="p"><b>${esc(cleanTitle(it.name, it.console).title)}</b> <span class="small muted">${esc(it.why)} · ${fmtSize(it.gameSize || it.size)}${it.partCount ? ` · ${it.partCount} parts` : ''}</span>
       ${err ? `<br><span class="small" style="color:var(--bad)">${esc(err)}</span>` : it.warn ? `<br><span class="small" style="color:var(--warn)">${esc(it.warn)}</span>` : ''}</span>${driveBadge(dest)}${right}</div>`;
@@ -1153,13 +1184,15 @@ V.inbox = () => {
   const reveal = it => `<button class="btn sm ghost" data-act="reveal" data-arg="${esc(it.file)}">Show</button>`;
   const err = inbox.error === 'no7z' ? `<div class="issue"><div class="grow"><b>7-Zip is needed to open game archives.</b><div class="small muted">Install it from the official site, then press Refresh.</div></div><button class="btn sm" data-act="url" data-arg="https://www.7-zip.org/">7-zip.org</button></div>`
     : inbox.error === 'nofolder' ? `<div class="issue"><b>The import folder doesn’t exist.</b>&nbsp;Pick another one.</div>` : '';
-  const risky = by('risky'), unknown = by('unknown'), dl = by('copying');
+  const risky = by('risky'), unknown = by('unknown'), dl = by('copying'), checking = by('checking');
   return `<div class="view"><h1 class="h1">Import</h1>
     <p class="sub">${folder ? `Game files in <span class="mono">${esc(folder)}</span>.` : 'Add game files you made from discs you own.'} EchoForge reads each disc to see which console it’s for, unpacks it to the right drive, checks every file and adds it with artwork. Programs and shortcuts here are never run.</p>
     <div class="row" style="margin-bottom:16px"><button class="btn primary" data-act="ibAddAll" ${!ready.length || inbox.busy ? 'disabled' : ''}>${ico('inbox')} Add all${ready.length ? ` (${ready.length})` : ''}</button>
       <button class="btn" data-act="ibRefresh">${ico('scan')} Refresh</button><button class="btn ghost" data-act="ibFolder">${folder ? 'Change folder' : 'Choose folder'}</button>${folder ? `<button class="btn ghost" data-act="openPath" data-arg="${esc(folder)}">Open folder</button>` : ''}</div>
     ${!folder ? '<div class="empty"><div class="big">Choose a folder</div><div>Nothing is checked until you pick one.</div></div>' : err}
-    ${ready.length ? `<div class="h2">Ready to add</div>${ready.map(row).join('')}` : folder && inbox.loaded && !err ? `<div class="empty"><div class="big">All caught up</div><div>Put a game file in this folder and it shows up here on its own.</div></div>` : ''}
+    ${folder && !inbox.loaded && !err ? '<div class="empty"><div class="big">Looking in your folder…</div></div>' : ''}
+    ${checking.length ? `<div class="h2">Checking ${checking.length} file${checking.length === 1 ? '' : 's'}</div><p class="small muted" style="margin-top:-6px">Each one moves to Ready to add as soon as EchoForge knows which console it’s for, usually a few seconds each.</p>${checking.map(it => plain(it)).join('')}` : ''}
+    ${ready.length ? `<div class="h2">Ready to add</div>${ready.map(row).join('')}` : folder && inbox.loaded && !err && !checking.length ? `<div class="empty"><div class="big">All caught up</div><div>Put a game file in this folder and it shows up here on its own.</div></div>` : ''}
     ${risky.length ? `<div class="h2">Not games: be careful</div><p class="small muted" style="margin-top:-6px">These aren’t games. EchoForge never opens them.</p>${risky.map(it => plain(it, `<button class="btn sm danger" data-act="ibRecycle" data-arg="${esc(it.file)}">${ico('trash', 14)} Recycle</button>`)).join('')}` : ''}
     ${dl.length ? `<div class="h2">Still being copied</div>${dl.map(it => plain(it)).join('')}` : ''}
     ${unknown.length ? `<div class="h2">Couldn’t tell what these are</div>${unknown.map(it => plain(it, reveal(it))).join('')}` : ''}
@@ -1388,7 +1421,7 @@ const SETTINGS = [
   ] },
   { id: 'look', name: 'Appearance', rows: [
     ['skin', 'Skin', 'A skin sets the colors, background, headings font and corner style. Make one from any game’s cover art, let EchoForge invent one, or share yours as a file.', 'skins'],
-    ['splash', 'Splash screen', 'What you see while EchoForge opens. Every style shows EchoForge’s name; press Preview to watch it.', 'splash'],
+    ['splash', 'Splash screen', 'The intro you see every time EchoForge opens, at 1920 × 1080 unless you pick another size. Every style shows EchoForge’s name; press Preview to watch it.', 'splash'],
     ['theme', 'Accent', 'The forge color used across the app.', 'swatch'],
     ['mode', 'Background', '', 'select', [['dark', 'Graphite (dark)'], ['oled', 'OLED black'], ['light', 'Light']]],
     ['card', 'Cover size', '', 'range', [130, 280, 2]],
@@ -1488,7 +1521,7 @@ function splashHTML(s) {
       <span class="small muted">${s.splashFile ? esc(s.splashName || s.splashFile) : 'PNG, JPEG, WebP, GIF, MP4 or WebM, up to 300 MB. EchoForge keeps its own copy.'}</span></div>
       <div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap"><label class="small">Fit <select class="input" data-set="splashFit"><option value="cover" ${s.splashFit !== 'contain' ? 'selected' : ''}>Fill the screen</option><option value="contain" ${s.splashFit === 'contain' ? 'selected' : ''}>Show all of it</option></select></label>
       ${video ? `<label class="small row" style="gap:6px"><input type="checkbox" class="toggle" data-set="splashToEnd" ${s.splashToEnd !== false ? 'checked' : ''}> Play the video to the end (up to 15 s)</label><label class="small row" style="gap:6px"><input type="checkbox" class="toggle" data-set="splashSound" ${s.splashSound ? 'checked' : ''}> Sound</label>` : ''}</div>` : ''}
-    <div class="row" style="margin-top:12px;gap:14px;flex-wrap:wrap"><label class="small">Size <select class="input" data-set="splashSize">${[['card', 'Card'], ['large', 'Large'], ['full', 'Full screen']].map(([v, l]) => `<option value="${v}" ${s.splashSize === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="row" style="margin-top:12px;gap:14px;flex-wrap:wrap"><label class="small">Size <select class="input" data-set="splashSize">${[['hd', '1920 × 1080'], ['card', 'Small card'], ['large', 'Large card'], ['full', 'All screens']].map(([v, l]) => `<option value="${v}" ${s.splashSize === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="small row" style="gap:8px">Show for at least <input type="range" min="1" max="10" step="0.5" value="${s.splashMin}" data-set="splashMin" data-num><span class="mono">${s.splashMin} s</span></label>
       <button class="btn sm primary" data-act="splashPreview">Preview</button></div>`;
 }
@@ -1511,6 +1544,8 @@ V.settings = () => {
     return '';
   };
   const about = `<div class="panel" style="display:flex;gap:24px;align-items:center"><img src="assets/logo.svg" width="110" alt=""><div><div class="wordmark" style="font-size:26px">ECHO<b>FORGE</b></div><div class="muted">Version ${esc(appVersion)} · open-source launcher for next-gen console emulation</div>
+    <p style="margin:12px 0 6px;line-height:1.5">EchoForge puts all your consoles in one place. It finds your games, sets up the emulators, gets your controller, racing wheel and saves ready, and starts each game with one button, from PlayStation and Xbox to GameCube and Wii.</p>
+    <p class="small" style="margin:0 0 10px"><b>The name:</b> <span class="muted">“Echo” because emulators recreate consoles, “Forge” because we’re building it.</span></p>
     <p class="small muted">EchoForge doesn’t include games, firmware or BIOS files. Use content you own. Emulators are separate projects under their own licenses.</p>
     <div class="small" style="margin:10px 0"><b>Updates</b> <span class="muted">${appUpdateText()}</span></div>
     <div class="row">${appUp.info && appUp.info.ok && appUp.info.update ? `<button class="btn sm primary" data-act="appUpdate" ${appUp.busy ? 'disabled' : ''}>${appUp.busy ? `Downloading ${appUp.pct}%` : `Update to ${esc(appUp.info.latest.version)}`}</button>` : ''}<button class="btn sm" data-act="appUpCheck" ${appUp.busy ? 'disabled' : ''}>Check for updates</button><button class="btn sm" data-act="openData">Open data folder</button></div></div></div>`;
@@ -1545,7 +1580,7 @@ async function fetchMissingShots() {
       const parts = g.path.split(/[\\/]/), base = parts[parts.length - 1].replace(/\.[^.]+$/, '').replace(/\.nkit$/i, '');
       const r = await window.ef.fetchShots({ id: g.id, console: g.console, names: [base, /usrdir/i.test(parts[parts.length - 2]) ? '' : parts[parts.length - 2], g.title] });
       g.shotsTried = Date.now();
-      if (r && r.ok) { for (const [k, f] of [['snap', r.snap], ['titleShot', r.title]]) if (f) { imgCache.delete(f); g[k] = f; } if (r.snap || r.title) n++; }
+      if (r && r.ok) { for (const [k, f] of [['snap', r.snap], ['titleShot', r.title]]) if (f) { forgetImage(f); g[k] = f; } if (r.snap || r.title) n++; }
     }
   } finally { fetchingShots = false; }
   if (n) { save(); if (route.view === 'game') render(); }
@@ -1932,6 +1967,8 @@ const ACT = {
   clearSeries: () => { lib.series = ''; render(); },
   ibAdd: (f) => importAll([f]),
   ibAddAll: () => importAll(inboxReady().map(i => i.file)),
+  retroOpen: () => openRetro(),
+  ibCancel: async () => { if (!inbox.busy || inbox.stopping) return; inbox.stopping = true; render(); await window.ef.inbox.cancel(); },
   ibRefresh: async () => { inbox.dirty = true; await refreshInbox(); toast('Import folder refreshed.'); },
   ibRecycle: async (f) => { const it = inbox.items.find(i => i.file === f); const r = await window.ef.inbox.recycle(f);
     if (r.ok) { inbox.cleaned.unshift({ name: it ? it.name : f, why: it ? it.why : '', at: Date.now() }); inbox.items = inbox.items.filter(i => i.file !== f); toast('Moved to the Recycle Bin.', 'ok'); } else { if (it) it.error = r.error; toast(esc(r.error), 'bad'); }
@@ -2062,23 +2099,31 @@ document.addEventListener('input', (ev) => {
 let keepSeries = false; // only "open collection" keeps the library filtered; the All Games button shows everything
 function go(view, param = null) {
   if (view !== 'settings') dropDrafts();
+  dropOldImages();
   if (view === 'library' && !keepSeries) lib.series = ''; keepSeries = false;
   if (view !== route.view || param !== route.param) { if (view === 'console' && route.param !== param && consoleTab !== 'tuning') consoleTab = 'games'; }
   route = { view, param }; S.lastView = view === 'console' ? `console:${param}` : view; save();
   renderSide(); render(); $('#main').scrollTop = 0;
 }
 function render() {
+  document.documentElement.dataset.retro = route.view === 'retro' ? 'on' : 'off';
   const fn = V[route.view] || V.home; const q = document.activeElement && document.activeElement.id === 'q';
   const html = fn(route.param);
   if (html === lastMain) return; // nothing on screen changed: keep the page (and its animations) as it is
+  const keep = padMode && focusKey(document.activeElement), view = route.view + ':' + route.param;
   lastMain = html; $('#main').innerHTML = html;
+  if (keep && view === render.view) { let el = null; try { el = $(keep, $('#main')); } catch {} if (el && !el.disabled) padFocus(el); }
+  render.view = view;
   hydrateImages($('#main'));
-  const hero = $('#heroArt'); if (hero) { const g = S.games.filter(x => x.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed)[0]; const src = backdropOf(g); if (src) window.ef.readImage(src).then(d => { if (d) hero.style.backgroundImage = `url(${d})`; }); }
+  const hero = $('#heroArt'); if (hero) { const g = S.games.filter(x => x.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed)[0]; const src = backdropOf(g); if (src) cachedImage(src).then(d => { if (d) hero.style.backgroundImage = `url("${d}")`; }); }
   const gb = $('#gpBack'), pg = route.view === 'game' && game(route.param);
   if (gb && pg) { const src = backdropOf(pg); gb.classList.toggle('soft', !(pg.bg || pg.snap || pg.titleShot)); // a cover is blurred; real art stays sharp
     if (src) cachedImage(src).then(d => { if (d) { gb.style.backgroundImage = `url("${d}")`; gb.classList.add('on'); } }); showBgArt(pg.id); }
   if (q) $('#q').focus();
 }
+
+// Files dropped on the window are ignored (the window never navigates away from EchoForge).
+for (const ev of ['dragover', 'drop']) document.addEventListener(ev, e => e.preventDefault());
 
 // ---------------- keyboard & controller ----------------
 document.addEventListener('keydown', (ev) => {
@@ -2097,13 +2142,48 @@ function focusables() {
   const root = $('#modal .modal') || document;
   return $$('button, input, select, [data-nav]', root).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !el.disabled && el.offsetParent !== null; });
 }
+// What the controller is on is marked with .gp-focus. The browser's own focus ring only shows after keyboard use, so
+// after any mouse click a controller had nothing to show. The mark follows focus while the controller is in use, comes
+// back after the page is redrawn, and goes away when the mouse moves.
+let padMode = false;
+function padFocus(el) { padMode = true; document.body.classList.add('pad-on'); el.focus({ preventScroll: true, focusVisible: true }); markPadFocus(el); }
+function markPadFocus(el) { for (const o of document.querySelectorAll('.gp-focus')) if (o !== el) o.classList.remove('gp-focus'); if (el && el !== document.body) el.classList.add('gp-focus'); }
+document.addEventListener('focusin', e => { if (padMode) markPadFocus(e.target); });
+document.addEventListener('mousemove', e => { if (!padMode || (Math.abs(e.movementX) + Math.abs(e.movementY) < 3)) return; padMode = false; document.body.classList.remove('pad-on'); markPadFocus(null); });
+// A way to find the same button again after a redraw.
+function focusKey(el) {
+  if (!el || el === document.body || !el.closest('#main')) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  for (const a of ['data-play', 'data-act']) if (el.hasAttribute(a)) {
+    let k = `[${a}="${CSS.escape(el.getAttribute(a))}"]`;
+    if (a === 'data-act' && el.hasAttribute('data-arg')) k += `[data-arg="${CSS.escape(el.getAttribute('data-arg'))}"]`;
+    return k;
+  }
+  return null;
+}
+// Retro Forge: EchoForge Retro Gaming's page, kept loaded beside the main area once opened, so going back is instant.
+// While it's showing, the controller belongs to it; Start comes back to EchoForge.
+V.retro = () => '<div class="view"></div>';
+let retroBusy = false;
+async function openRetro() {
+  const box = $('#retroFrame');
+  if (box.firstChild) { go('retro'); retroFocus(); return; }
+  if (retroBusy) return; retroBusy = true;
+  toast('Starting Retro Forge…');
+  const r = await window.ef.retroStart().finally(() => { retroBusy = false; });
+  if (!r || !r.ok) { toast(esc((r && r.error) || 'Retro Forge didn’t start.'), 'bad'); return; }
+  const f = document.createElement('iframe');
+  f.src = r.url; f.title = 'EchoForge Retro Gaming'; f.allow = 'gamepad; fullscreen; autoplay';
+  box.appendChild(f); go('retro'); f.addEventListener('load', retroFocus);
+}
+function retroFocus() { const f = $('#retroFrame iframe'); if (f && route.view === 'retro') setTimeout(() => f.focus(), 50); }
 function moveFocus(dir) {
   const list = focusables(); const cur = document.activeElement && list.includes(document.activeElement) ? document.activeElement : null;
   // Nothing highlighted yet: start where you'd expect. A game's page starts on Play, not on a cover further down.
   if (!cur) {
     const box = $('#modal .modal') || $('#main');
     const first = $('[data-autofocus]', box) || (!$('#modal .modal') && route.view === 'game' && $('#main [data-act="play"]')) || $('.game', box) || list[0];
-    if (first) { first.focus({ preventScroll: true }); first.scrollIntoView({ block: 'nearest' }); blip('move'); }
+    if (first) { padFocus(first); first.scrollIntoView({ block: 'nearest' }); blip('move'); }
     return;
   }
   const a = cur.getBoundingClientRect(); const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
@@ -2115,7 +2195,7 @@ function moveFocus(dir) {
     const main = dir === 'left' || dir === 'right' ? Math.abs(dx) : Math.abs(dy); const cross = dir === 'left' || dir === 'right' ? Math.abs(dy) : Math.abs(dx);
     const score = main + cross * 2.5; if (score < bestScore) { bestScore = score; best = el; }
   }
-  if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: set().motion === 'full' ? 'smooth' : 'auto' }); blip('move'); }
+  if (best) { padFocus(best); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: set().motion === 'full' ? 'smooth' : 'auto' }); blip('move'); }
 }
 const pad = { prev: {}, next: 0, rest: {} };
 // Racing wheels, pedals and shifters show up as game controllers too, but their axes rest at the ends (a pedal
@@ -2158,6 +2238,10 @@ function padLoop() {
   const ax = (i, sign) => pads.some(gp => { const r = pad.rest[gp.id + gp.index][i] || 0; return Math.abs(r) < 0.3 && (gp.axes[i] - r) * sign > dz; });
   const p = pads[0] || whl.gp;
   const now = performance.now();
+  if (route.view === 'retro') { // Retro's page reads the controller itself
+    const v = b(9), was = pad.prev[9]; pad.prev[9] = v; if (v && !was) { blip('back'); go('home'); }
+    for (const i of [0, 1, 2, 3, 4, 5, 8]) pad.prev[i] = b(i); pad.held = null; return;
+  }
   const dirs = { up: b(12) || ax(1, -1), down: b(13) || ax(1, 1), left: b(14) || ax(0, -1), right: b(15) || ax(0, 1) };
   const held = Object.keys(dirs).find(k => dirs[k]);
   if (held) { if (pad.held !== held || now > pad.next) { moveFocus(held); pad.next = now + (pad.held === held ? 110 : 320); pad.held = held; } } else pad.held = null;
@@ -2185,7 +2269,12 @@ window.addEventListener('gamepadconnected', (e) => {
 (async function boot() {
   const st = (p, m) => window.ef.splashStatus({ p, m });
   st(15, 'Loading your library');
-  S = hydrate(await window.ef.load());
+  const raw = await window.ef.load();
+  S = hydrate(raw && raw.damaged ? null : raw);
+  // The library file was damaged: it was set aside and a daily copy was loaded (or, with none, a fresh library).
+  if (raw && (raw.restoredFrom || raw.damaged)) setTimeout(() => toast(raw.restoredFrom
+    ? `Your library file was damaged, so EchoForge loaded its copy from ${esc(raw.restoredFrom)}. The damaged file was kept next to it.`
+    : 'Your library file was damaged and there was no copy to load, so EchoForge started fresh. The damaged file was kept in the data folder.', 'bad'), 3000);
   applyLook();
   appVersion = await window.ef.version();
   window.ef.win.onState(() => {});

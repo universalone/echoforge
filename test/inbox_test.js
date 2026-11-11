@@ -43,5 +43,17 @@ const XBOX = 'MICROSOFT*XBOX*MEDIA';
   r = await classifyDisc(d.read, 'Game.iso', 3e9, false);
   check('original Xbox XISO', r.console === 'xbox', JSON.stringify(r));
 
+  d = disc(); iso(d, 'VIDEO_TS'); d.put(0x18310000, XBOX);
+  r = await classifyDisc(d.read, 'Game.iso', 7.83e9, false);
+  check('full original Xbox disc image (video section first) is a game', r.console === 'xbox' && r.xboxGameAt === 0x18300000, JSON.stringify(r));
+
+  // Keeping only the game part of a file: everything from the offset on, nothing before it.
+  const fs = require('fs'), os = require('os'), path = require('path'), { keepFrom } = require('../app/inbox');
+  const f = path.join(os.tmpdir(), 'ef-keepfrom-test.iso'), body = Buffer.alloc(5000);
+  for (let i = 0; i < body.length; i++) body[i] = i % 251;
+  fs.writeFileSync(f, body); await keepFrom(f, 1234);
+  check('keeps the file from the game part on', fs.readFileSync(f).equals(body.subarray(1234)));
+  fs.rmSync(f, { force: true });
+
   console.log(fails ? `${fails} FAILED` : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

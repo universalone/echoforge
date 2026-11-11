@@ -1,5 +1,5 @@
 // Narrow, explicit bridge between the UI and the main process.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 const invoke = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 
@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('ef', {
   recycleInfo: invoke('game:recycleInfo'),
   recycleGame: invoke('game:recycle'),
   readImage: invoke('fs:readImage'),
+  imageUrl: invoke('fs:imageUrl'),
+  retroStart: invoke('retro:start'),
+  dropImageMemory: () => webFrame.clearCache(),
   mkdirs: invoke('fs:mkdirs'),
   scan: invoke('fs:scan'),
   checkBios: invoke('bios:check'),
@@ -40,6 +43,7 @@ contextBridge.exposeInMainWorld('ef', {
   inbox: {
     scan: invoke('inbox:scan'),
     import: invoke('inbox:import'),
+    cancel: invoke('inbox:cancel'),
     recycle: invoke('inbox:recycle'),
     watch: invoke('inbox:watch'),
     onChange: (fn) => ipcRenderer.on('inbox:changed', () => fn()),

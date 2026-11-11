@@ -1,5 +1,9 @@
 // EchoForge — main process: splash, window, storage, scanning, firmware checks, hardware probe, launching.
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut, protocol } = require('electron');
+// Covers and backgrounds reach the page as efimg:// addresses, so the browser caches and frees them like any web image.
+// (They used to be sent as base64 text, which the page kept forever: browsing grew the window's memory by gigabytes.)
+protocol.registerSchemesAsPrivileged([{ scheme: 'efimg', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
 const quit = require('./quit');
 const pauseMenu = require('./pausemenu');
 const synopsis = require('./synopsis');
@@ -40,15 +44,22 @@ function splashSettings(o) {
   const file = typeof st.splashFile === 'string' ? path.join(splashDir(), path.basename(st.splashFile)) : '';
   let style = SPLASH_STYLES.includes(st.splash) ? st.splash : 'forge';
   if (style === 'custom' && !(file && SPLASH_MEDIA.test(file) && fs.existsSync(file))) style = 'forge';
-  return { style, file: style === 'custom' ? file : '', size: ['card', 'large', 'full'].includes(st.splashSize) ? st.splashSize : 'card',
+  // 1920 × 1080 is the default. Settings saved before it existed (no splashSizeV) get it too.
+  const size = st.splashSizeV === 2 && ['card', 'large', 'hd', 'full'].includes(st.splashSize) ? st.splashSize : 'hd';
+  return { style, file: style === 'custom' ? file : '', size,
     min: Math.min(10, Math.max(1, Number(st.splashMin) || 2.4)), toEnd: st.splashToEnd !== false, sound: !!st.splashSound, fit: st.splashFit === 'contain' ? 'contain' : 'cover' };
 }
 function openSplash(o) {
   const { screen } = require('electron');
   const area = screen.getPrimaryDisplay().bounds;
-  const dims = o.size === 'full' ? { x: area.x, y: area.y, width: area.width, height: area.height } : o.size === 'large' ? { width: 980, height: 560 } : { width: 560, height: 380 };
+  // 1920 × 1080 (or the largest 16:9 that fits a smaller screen), centered: on a screen spanning several monitors it
+  // sits on the middle one.
+  const hd = Math.min(1, area.width / 1920, area.height / 1080);
+  const dims = o.size === 'full' ? { x: area.x, y: area.y, width: area.width, height: area.height }
+    : o.size === 'hd' ? { x: Math.round(area.x + (area.width - 1920 * hd) / 2), y: Math.round(area.y + (area.height - 1080 * hd) / 2), width: Math.round(1920 * hd), height: Math.round(1080 * hd) }
+    : o.size === 'large' ? { width: 980, height: 560 } : { width: 560, height: 380 };
   const w = new BrowserWindow({
-    ...dims, frame: false, transparent: o.size !== 'full', backgroundColor: o.size === 'full' ? '#000000' : undefined, resizable: false,
+    ...dims, frame: false, transparent: !['full', 'hd'].includes(o.size), backgroundColor: ['full', 'hd'].includes(o.size) ? '#000000' : undefined, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, show: false, icon: ICON,
     webPreferences: { preload: path.join(__dirname, 'splash-preload.js'), contextIsolation: true, sandbox: true, autoplayPolicy: 'no-user-gesture-required' }
   });
@@ -97,16 +108,34 @@ function createMain() {
     width: 1440, height: 880, minWidth: 1040, minHeight: 640,
     frame: false, backgroundColor: '#0b0c10', show: false, icon: ICON,
     title: 'EchoForge',
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false }
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true }
   });
   win.loadFile(path.join(__dirname, 'index.html'));
   win.on('maximize', () => win.webContents.send('win:state', true));
   win.on('unmaximize', () => win.webContents.send('win:state', false));
   // Links never open inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // The window only ever shows EchoForge: a dropped file or a link never replaces it (a dropped page would get its access).
+  win.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https:\/\//.test(url)) shell.openExternal(url); });
 }
 
 app.whenReady().then(() => {
+  // Only picture files are served, and only to EchoForge's own window.
+  // With w=, a smaller copy is served (made once, kept in userData	humbs): a 184-pixel card doesn't need a
+  // 1920-pixel picture decoded in memory.
+  protocol.handle('efimg', async req => {
+    const q = new URL(req.url).searchParams, p = q.get('p') || '', w = Math.min(2000, parseInt(q.get('w'), 10) || 0);
+    let type = IMAGE_TYPES[path.extname(p).toLowerCase()];
+    if (!type || !path.isAbsolute(p)) return new Response(null, { status: 404 });
+    const headers = t => ({ 'content-type': t, 'cache-control': 'max-age=31536000, immutable', 'access-control-allow-origin': '*' });
+    try {
+      if (w) {
+        const thumb = await thumbOf(p, q.get('v') || '', w, type);
+        if (thumb) return new Response(await fsp.readFile(thumb.file), { headers: headers(thumb.type) });
+      }
+      return new Response(await fsp.readFile(p), { headers: headers(type) });
+    } catch { return new Response(null, { status: 404 }); }
+  });
   createSplash();
   const shownAt = Date.now();
   createMain();
@@ -139,6 +168,8 @@ if (process.env.EF_SNAP && !app.isPackaged) {
     const snap = async (wc, name) => {
       try { fs.writeFileSync(path.join(dir, name + '.png'), (await wc.capturePage()).toPNG()); } catch (e) { console.log('snap capture failed', name, e.message); }
       fs.writeFileSync(path.join(dir, name + '.txt'), String(await wc.executeJavaScript('document.body.innerText').catch(() => '')));
+      const mem = app.getAppMetrics().filter(m => m.type === 'Tab').map(m => ({ pid: m.pid, workingSetMB: Math.round(m.memory.workingSetSize / 1024), privateMB: Math.round((m.memory.privateBytes || 0) / 1024) }));
+      fs.writeFileSync(path.join(dir, name + '.mem.json'), JSON.stringify(mem));
     };
     setTimeout(() => { if (splash) snap(splash.webContents, 'splash'); }, 1900);
     setTimeout(async () => {
@@ -156,8 +187,21 @@ if (process.env.EF_SNAP && !app.isPackaged) {
 }
 
 // ---------- storage ----------
+// Library file: a copy is kept for each of the last 7 days. If the file is ever damaged (a power cut, a disk error),
+// it's set aside as .damaged and the newest good copy is loaded, so the library is never replaced by an empty one.
+const backupDir = () => path.join(app.getPath('userData'), 'library-backups');
+async function readLibrary(file) { const raw = await fsp.readFile(file, 'utf8'); const d = JSON.parse(raw); if (!d || typeof d !== 'object' || !Array.isArray(d.games)) throw new Error('not a library'); return d; }
 ipcMain.handle('store:load', async () => {
-  try { return JSON.parse(await fsp.readFile(DATA_FILE(), 'utf8')); } catch { return null; }
+  const f = DATA_FILE();
+  if (!fs.existsSync(f)) return null; // first run
+  try { return await readLibrary(f); } catch {}
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  try { await fsp.rename(f, f.replace(/\.json$/, `.damaged-${stamp}.json`)); } catch {}
+  let copies = []; try { copies = (await fsp.readdir(backupDir())).filter(n => /^echoforge-data-\d{4}-\d\d-\d\d\.json$/.test(n)).sort().reverse(); } catch {}
+  for (const n of copies) {
+    try { const d = await readLibrary(path.join(backupDir(), n)); d.restoredFrom = n.slice(15, 25); return d; } catch {}
+  }
+  return { damaged: true, games: [] }; // nothing to restore: start fresh, but say so
 });
 let saveChain = Promise.resolve();
 ipcMain.handle('store:save', (_e, data) => {
@@ -165,10 +209,22 @@ ipcMain.handle('store:save', (_e, data) => {
   saveChain = saveChain.then(async () => {
     const f = DATA_FILE(); const tmp = f + '.tmp';
     await fsp.mkdir(path.dirname(f), { recursive: true });
-    await fsp.writeFile(tmp, JSON.stringify(data, null, 1));
+    // Once a day, the library as it was is copied before it's replaced; the last 7 copies are kept.
+    const day = path.join(backupDir(), `echoforge-data-${new Date().toISOString().slice(0, 10)}.json`);
+    if (!fs.existsSync(day) && fs.existsSync(f)) {
+      try {
+        await readLibrary(f); // only a good file is worth keeping
+        await fsp.mkdir(backupDir(), { recursive: true }); await fsp.copyFile(f, day);
+        const old = (await fsp.readdir(backupDir())).filter(n => /^echoforge-data-.*\.json$/.test(n)).sort().reverse().slice(7);
+        for (const n of old) await fsp.rm(path.join(backupDir(), n), { force: true });
+      } catch {}
+    }
+    const { restoredFrom, damaged, ...clean } = data || {};
+    await fsp.writeFile(tmp, JSON.stringify(clean, null, 1));
     await fsp.rename(tmp, f);
-  }).catch(() => {});
-  return saveChain.then(() => true);
+    return true;
+  }).catch(e => { console.error('save failed', e.message); return false; });
+  return saveChain;
 });
 ipcMain.handle('store:export', async (_e, data) => {
   const r = await dialog.showSaveDialog(win, { title: 'Back up EchoForge', defaultPath: `echoforge-backup-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'EchoForge backup', extensions: ['json'] }] });
@@ -215,7 +271,8 @@ ipcMain.handle('dialog:folder', async (_e, opts = {}) => {
   return r.canceled ? null : r.filePaths[0];
 });
 ipcMain.handle('shell:external', (_e, url) => { if (/^https:\/\//.test(url)) return shell.openExternal(url); });
-ipcMain.handle('shell:path', (_e, p) => shell.openPath(p));
+// Opens folders only: opening a program file would run it.
+ipcMain.handle('shell:path', async (_e, p) => { try { if ((await fsp.stat(p)).isDirectory()) return shell.openPath(p); } catch {} return 'Not a folder'; });
 ipcMain.handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
 ipcMain.handle('app:loginItem', (_e, on) => { app.setLoginItemSettings({ openAtLogin: !!on }); return true; });
 ipcMain.handle('app:relaunch', () => { app.relaunch(); app.exit(0); });
@@ -232,6 +289,50 @@ ipcMain.handle('fs:exists', async (_e, p) => { try { await fsp.access(p); return
 ipcMain.handle('fs:existsMany', async (_e, list) => Promise.all(list.map(async p => { try { await fsp.access(p); return true; } catch { return false; } })));
 ipcMain.handle('fs:readText', async (_e, p) => { try { return (await fsp.readFile(p, 'utf8')).slice(0, 4096); } catch { return null; } });
 ipcMain.handle('fs:mkdirs', async (_e, list) => { for (const d of list) { try { await fsp.mkdir(d, { recursive: true }); } catch {} } return true; });
+// A smaller copy of a picture, or null when the picture is already small (or can't be read): JPEG for photos,
+// PNG when the picture has see-through parts (game icons).
+const thumbsBusy = new Map();
+async function thumbOf(p, v, w, type) {
+  const dir = path.join(app.getPath('userData'), 'thumbs'), key = crypto.createHash('sha1').update(`${p}|${v}|${w}`).digest('hex');
+  for (const [ext, t] of [['.jpg', 'image/jpeg'], ['.png', 'image/png']]) { const f = path.join(dir, key + ext); if (fs.existsSync(f)) return { file: f, type: t }; }
+  const small = path.join(dir, key + '.none'); if (fs.existsSync(small)) return null;
+  if (thumbsBusy.has(key)) return thumbsBusy.get(key);
+  const job = (async () => {
+    await fsp.mkdir(dir, { recursive: true });
+    const img = nativeImage.createFromPath(p); if (img.isEmpty()) return null;
+    const { width } = img.getSize();
+    if (width <= w * 1.25) { await fsp.writeFile(small, ''); return null; }
+    const r = img.resize({ width: w, quality: 'good' });
+    const alpha = type === 'image/png' && (() => { const b = r.toBitmap(); for (let i = 3; i < b.length; i += 4) if (b[i] < 250) return true; return false; })();
+    const file = path.join(dir, key + (alpha ? '.png' : '.jpg'));
+    await fsp.writeFile(file, alpha ? r.toPNG() : r.toJPEG(86));
+    return { file, type: alpha ? 'image/png' : 'image/jpeg' };
+  })().finally(() => thumbsBusy.delete(key));
+  thumbsBusy.set(key, job); return job;
+}
+// Retro Forge: EchoForge Retro Gaming runs its page on 127.0.0.1:8765. It's started without its own window (it shuts
+// itself down 90 seconds after its page goes away), and EchoForge shows that page in place of the main area.
+const RETRO_URL = 'http://127.0.0.1:8765/';
+const retroUp = () => new Promise(res => {
+  const r = require('http').get(RETRO_URL + 'api/status', { timeout: 1000 }, x => { x.resume(); res(x.statusCode === 200); });
+  r.on('error', () => res(false)); r.on('timeout', () => { r.destroy(); res(false); });
+});
+ipcMain.handle('retro:start', async () => {
+  if (await retroUp()) return { ok: true, url: RETRO_URL };
+  const dir = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'EchoForge Retro Gaming');
+  const py = path.join(dir, 'python', 'pythonw.exe'), script = path.join(dir, 'app', 'jl_retro.pyw');
+  if (!fs.existsSync(py) || !fs.existsSync(script)) return { ok: false, error: 'EchoForge Retro Gaming isn’t installed on this PC.' };
+  try { spawn(py, [script, '--no-window'], { cwd: path.dirname(script), detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
+  catch (e) { return { ok: false, error: e.message }; }
+  for (let i = 0; i < 60; i++) { await new Promise(r => setTimeout(r, 300)); if (await retroUp()) return { ok: true, url: RETRO_URL }; }
+  return { ok: false, error: 'EchoForge Retro Gaming didn’t start. Try opening it from the Start menu.' };
+});
+
+// The address of a picture, or null when it's missing. The file's change time is part of it, so a replaced cover shows at once.
+ipcMain.handle('fs:imageUrl', async (_e, p, w) => {
+  if (typeof p !== 'string' || !IMAGE_TYPES[path.extname(p).toLowerCase()]) return null;
+  try { const st = await fsp.stat(p); return `efimg://img/?p=${encodeURIComponent(p)}&v=${Math.round(st.mtimeMs)}${w > 0 ? `&w=${Math.round(w)}` : ''}`; } catch { return null; }
+});
 ipcMain.handle('fs:readImage', async (_e, p) => {
   try { const b = await fsp.readFile(p); return 'data:image/' + (p.toLowerCase().endsWith('.jpg') || p.toLowerCase().endsWith('.jpeg') ? 'jpeg' : 'png') + ';base64,' + b.toString('base64'); } catch { return null; }
 });
@@ -585,7 +686,7 @@ async function pspIsoMeta(file) {
   } finally { await fh.close(); }
 }
 
-require('./inbox').register({ ipcMain, shell, getWin: () => win });
+require('./inbox').register({ ipcMain, shell, getWin: () => win, cacheFile: path.join(app.getPath('userData'), 'inbox-cache.json') });
 require('./compat').register({ ipcMain, app, getWin: () => win, x360TitleId });
 require('./backup').register({ ipcMain, app, shell });
 require('./downloads').register({ ipcMain });

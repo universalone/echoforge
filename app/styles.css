@@ -62,6 +62,18 @@ a { color: var(--a1); }
 .search input { flex: 1; background: none; border: 0; outline: 0; }
 .search kbd { font-size: 11px; color: var(--faint); border: 1px solid var(--line2); padding: 0 5px; border-radius: 4px; }
 .tb-spacer { flex: 1; }
+/* Retro Forge: EchoForge Retro Gaming's own page, shown in place of the main area */
+/* looks like the ECHOFORGE wordmark on the left; a gradient line under it while Retro is open */
+.retro-btn { -webkit-app-region: no-drag; height: 34px; padding: 0 10px; border: 0; background: none; color: var(--text); cursor: pointer; white-space: nowrap;
+  position: relative; opacity: .85; transition: opacity .15s; }
+.retro-btn:hover, .retro-btn:focus-visible { opacity: 1; }
+.retro-btn::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; background: var(--grad); opacity: 0; transition: opacity .15s; }
+[data-retro="on"] .retro-btn { opacity: 1; } [data-retro="on"] .retro-btn::after { opacity: 1; }
+[data-compact="on"] .wordmark.retro-btn { display: block; } /* compact mode hides the logo's wordmark, not this */
+.retro-frame { display: none; overflow: hidden; z-index: 6; }
+.retro-frame iframe { width: 100%; height: 100%; border: 0; display: block; background: #000; }
+[data-retro="on"] .retro-frame { display: block; }
+[data-retro="on"] #main { visibility: hidden; }
 .nowplaying { -webkit-app-region: no-drag; display: none; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border: 1px solid color-mix(in srgb, var(--a2) 50%, transparent);
   background: color-mix(in srgb, var(--a2) 12%, transparent); border-radius: 30px; font-size: 13px; }
 .nowplaying.on { display: flex; }
@@ -127,6 +139,11 @@ a { color: var(--a1); }
 :focus { outline: none; }
 :focus-visible, .gp-focus { outline: 2px solid var(--a1) !important; outline-offset: 3px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--a2) 25%, transparent); }
 [data-focus="strong"] :focus-visible, [data-focus="strong"] .gp-focus { outline-width: 4px !important; }
+/* controller: a bright, thick ring with a glow, readable from the couch */
+.pad-on .gp-focus { outline: 4px solid var(--a1) !important; outline-offset: 4px; box-shadow: 0 0 0 9px color-mix(in srgb, var(--a2) 55%, transparent), 0 0 36px 6px color-mix(in srgb, var(--a1) 80%, transparent) !important; position: relative; z-index: 2; }
+/* game cards sit in scrolling rows that clip anything outside them, so their ring is drawn just inside the edge */
+.pad-on .game.gp-focus { outline-offset: -4px; box-shadow: inset 0 0 0 9px color-mix(in srgb, var(--a2) 55%, transparent), 0 0 30px 4px color-mix(in srgb, var(--a1) 80%, transparent) !important; border-radius: 12px; }
+[data-focus="strong"] .pad-on .gp-focus { outline-width: 5px !important; }
 
 /* inputs */
 .input, select.input { height: 36px; padding: 0 12px; background: var(--bg2); border: 1px solid var(--line2); border-radius: 6px; outline: 0; min-width: 0; }
