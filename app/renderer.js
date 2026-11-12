@@ -612,6 +612,11 @@ async function play(gid) {
       if (!go) return;
     }
   }
+  // A PCSX2 that was never opened waits on its first-time setup and uses the keyboard (app/pads.js).
+  if (g.console === 'ps2' && emuId === 'pcsx2' && set().padAutoSetup) {
+    const r = await window.ef.pads.pcsx2(emuPath('pcsx2'));
+    if (r && r.ok && r.changed.length) toast(r.changed.includes('controller') ? 'Set up PCSX2 and your controller for PS2 games.' : 'Finished PCSX2’s first-time setup.', 'ok');
+  }
   if (set().wheel && ((g.console === 'ps3' && emuId === 'rpcs3') || (g.console === 'ps2' && emuId === 'pcsx2'))) {
     const r = g.console === 'ps3' ? await window.ef.wheels.rpcs3({ exe: emuPath('rpcs3'), profile: set().wheel, on: wheelOn(g) })
       : await window.ef.wheels.pcsx2({ exe: emuPath('pcsx2'), profile: set().wheel, on: wheelOn(g), index: +set().wheelPcsx2Index || 0 });
@@ -1450,7 +1455,7 @@ const SETTINGS = [
     ['gameTdbArt', 'PS3 covers from GameTDB', 'A community cover database with box art for most PS3 games, used in place of the small disc icon. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['compatCheck', 'Check which games run', 'Looks up PS3 games on RPCS3’s compatibility list and Xbox 360 games on Xenia Canary’s. Only the game’s disc ID is sent. Refreshed weekly.', 'toggle'],
     ['compatBadges', 'Show “will it run?” badges on covers', 'The game’s details always show it.', 'toggle'],
-    ['padAutoSetup', 'Set up my controller for PS3 games', 'If RPCS3 has no controller set up, EchoForge sets up your connected PS4, PS5 or Xbox-style controller before a PS3 game starts. A setup you made in RPCS3 is never changed.', 'toggle'],
+    ['padAutoSetup', 'Set up my controller for PS2 and PS3 games', 'If RPCS3 has no controller set up, EchoForge sets up your connected PS4, PS5 or Xbox-style controller before a PS3 game starts. Before a PS2 game it finishes PCSX2’s first-time setup and, if PCSX2 only has keyboard keys, adds your controller. A setup you made yourself is never changed.', 'toggle'],
     ['scanDepth', 'Folder scan depth', 'How many subfolders deep to look. PS3/PS4 folders need at least 4.', 'range', [2, 10, 1]],
     ['ignore', 'Ignore paths containing', 'Comma separated, e.g. update, dlc, backup', 'text'],
     ['_rescan', 'Rescan everything', 'Runs a full scan of every console folder now.', 'button', 'Scan all']
