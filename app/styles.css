@@ -86,6 +86,9 @@ a { color: var(--a1); }
 
 /* ---------- sidebar ---------- */
 .side { position: fixed; top: 52px; bottom: 0; left: 0; width: 232px; padding: 14px 10px 18px; overflow-y: auto; z-index: 10; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg2) 70%, transparent); }
+.nav.more .mchev { margin-left: auto; display: flex; transition: transform .15s; } .nav.more.open .mchev { transform: rotate(180deg); }
+.sidemore { margin-left: 10px; padding-left: 6px; border-left: 1px solid var(--line); }
+[data-compact="on"] .sidemore { margin-left: 0; padding-left: 0; border-left: 0; } [data-compact="on"] .nav.more .mchev { display: none; }
 .side h6 { margin: 18px 12px 6px; font: 600 10.5px var(--display); letter-spacing: .24em; text-transform: uppercase; color: var(--faint); }
 .nav { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px; border: 0; background: none; text-align: left; cursor: pointer; color: var(--muted); position: relative; border-radius: 8px; }
 .nav svg { width: 18px; height: 18px; flex: none; }

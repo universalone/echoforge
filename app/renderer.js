@@ -10,6 +10,8 @@ const hueVars = c => `--h1:${c.hue[0]};--h2:${c.hue[1]}`;
 
 const I = {
   home: '<path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-6h6v6"/>',
+  more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
   lib: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
   pc: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
   emu: '<path d="M6 12h4M8 10v4"/><circle cx="15" cy="11" r="1"/><circle cx="17" cy="13" r="1"/><path d="M7 6h10a5 5 0 0 1 5 5v1a5 5 0 0 1-9 3h-2a5 5 0 0 1-9-3v-1a5 5 0 0 1 5-5z"/>',
@@ -36,7 +38,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 // ---------------- state ----------------
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
-  wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
+  sideMore: false, wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
   sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
@@ -329,6 +331,23 @@ async function wheelFinish() {
   set().wheelProfiles = [...list, p]; useWheel(p.id, true);
   toast(list.length ? `Saved <b>${esc(p.name)}</b> and switched to it.` : `<b>${esc(p.name)}</b> is set up. Turn on “Use racing wheel” on a racing game’s page.`, 'ok');
 }
+// Calibrating (centring, steering range, pedal deadzones) is done in the wheel maker's own software, which saves it on
+// the wheel base so it works in every game (app/wheelsoft.js). Looked up once per wheel; Windows' calibration always works.
+let wheelSoft = { key: '', data: null };
+function wheelCalibHTML(w) {
+  const key = `${w.vid}:${w.pid}:${w.name}`;
+  if (wheelSoft.key !== key) {
+    wheelSoft = { key, data: null };
+    window.ef.wheelSoft.info({ vid: w.vid, pid: w.pid, name: w.name }).then(d => { if (wheelSoft.key !== key) return; wheelSoft.data = d; if (route.view === 'settings') render(); }).catch(() => {});
+  }
+  const d = wheelSoft.data, b = d && d.brand, apps = (d && d.apps) || [];
+  const where = apps.length ? esc(apps[0].label) : b ? esc(b.get) : 'your wheel’s own software';
+  const text = b
+    ? `Centre the wheel, set its steering range and add pedal deadzones in ${where}. They’re saved on your ${esc(b.name)} base, so they work in every game.${apps.length ? '' : ` It isn’t installed on this PC: “Get” opens ${esc(b.name)}’s page for it.`}`
+    : 'Centre the wheel, set its steering range and add pedal deadzones in your wheel maker’s software, so they work in every game. Windows’ own calibration works for any wheel.';
+  return `<div class="small" style="margin:2px 0 6px"><b>Calibrate</b> <span class="muted">· ${text}</span></div>
+    <div class="row" style="margin-bottom:12px;flex-wrap:wrap">${apps.map(a => `<button class="btn sm primary" data-act="wheelSoftOpen" data-arg="${a.i}">Open ${esc(a.label)}</button>`).join('')}${b && !apps.length ? `<button class="btn sm" data-act="wheelSoftGet">Get ${esc(b.get)}</button>` : ''}<button class="btn sm ghost" data-act="wheelSoftWin" title="Game Controllers › your wheel › Properties › Settings › Calibrate">Windows calibration</button></div>`;
+}
 function wheelPanelHTML() {
   const w = set().wheel;
   if (wheelCal) {
@@ -346,6 +365,7 @@ function wheelPanelHTML() {
   return `<div class="small" style="margin-bottom:6px"><b>Profiles</b> <span class="muted">· one for each wheel or rim. Games use the one that’s selected.</span></div>
     <div class="row" style="margin-bottom:12px;flex-wrap:wrap">${list.map(p => `<button class="btn sm ${p.id === set().wheelActive ? 'primary' : 'ghost'}" data-act="wheelUse" data-arg="${esc(p.id)}" aria-pressed="${p.id === set().wheelActive}">${esc(p.name)}</button>`).join('')}<button class="btn sm" data-act="wheelNew">+ New profile</button></div>
     <div class="small" style="margin-bottom:10px"><b>${esc(cur ? cur.name : w.name)}</b>${cur && cur.name !== w.name ? ` <span class="muted">(${esc(w.name)})</span>` : ''} · steering axis ${w.steer} · throttle ${ax(w.throttle)} · brake ${ax(w.brake)} · clutch ${ax(w.clutch)} · ${Object.keys(w.buttons || {}).filter(k => !k.startsWith('dpad_')).length} buttons · ${dpad}</div>
+    ${wheelCalibHTML(w)}
     <div class="small muted" style="margin-bottom:10px">PS3 games use it as a Logitech G27 and PS2 games as a Logitech Driving Force, in games that support those wheels. Games on EchoForge’s list of wheel games use it automatically; for others, press “Use racing wheel” on the game’s page. Xbox 360 games can use it as an Xbox controller (steering on the stick, pedals on the triggers). PS4, PS5 and Xbox One emulators don’t support wheels yet.</div>
     ${(() => { const list = wheelGames(); return `<div class="small" style="margin-bottom:10px"><b>Your wheel games:</b> ${list.length ? list.slice(0, 20).map(g => `<button class="linkbtn" data-act="openGame" data-arg="${g.id}">${esc(tt(g))}</button>`).join(', ') + (list.length > 20 ? ` and ${list.length - 20} more` : '') : 'none of your PS3 or PS2 games is on the list yet. Racing games such as Gran Turismo 4, 5 and 6, DiRT, GRID and Need for Speed Shift support wheels.'}</div>`; })()}
     <div class="row"><button class="btn sm" data-act="wheelSetup">Set up this profile again</button><button class="btn sm ghost" data-act="wheelRename">Rename</button><button class="btn sm ghost" data-act="wheelRemove">Delete profile</button></div>`;
@@ -873,7 +893,7 @@ function renderSide() {
   const nav = (view, label, icon, param = null, badge = '') =>
     `<button class="nav ${v === view && (param === null || p === param) ? 'active' : ''}" data-act="go" data-arg="${view}${param ? ':' + param : ''}">${ico(icon)}<span>${label}</span>${badge ? `<span class="badge">${badge}</span>` : ''}</button>`;
   const ib = inboxReady().length + inbox.items.filter(i => i.status === 'risky').length;
-  let html = nav('home', 'Home', 'home') + nav('library', 'All Games', 'lib', null, S.games.filter(g => !g.hidden).length || '') + nav('collections', 'Collections', 'stack', null, seriesData().list.length || '') + nav('inbox', 'Import', 'inbox', null, ib || '') + nav('shared', 'Shared games', 'share') + nav('pc', 'Your PC', 'pc');
+  let html = nav('home', 'Home', 'home') + nav('library', 'All Games', 'lib', null, S.games.filter(g => !g.hidden).length || '') + nav('collections', 'Collections', 'stack', null, seriesData().list.length || '') + nav('inbox', 'Import', 'inbox', null, ib || '');
   for (const grp of G) {
     const cs = enabledConsoles().filter(c => c.group === grp.id); if (!cs.length) continue;
     html += `<h6>${esc(grp.name)}</h6>`;
@@ -884,10 +904,16 @@ function renderSide() {
         <span class="badge">${h.games || ''}</span><i class="st" style="background:${statusColor(h.status)}" title="${h.ready ? 'Ready' : 'Needs setup'}"></i></button>`;
     }
   }
-  html += `<h6>Forge</h6>` + nav('emulators', 'Emulators', 'emu') + nav('firmware', 'Firmware & BIOS', 'shield') + nav('backups', 'Save backups', 'save') + nav('settings', 'Settings', 'gear') + nav('guide', 'Guide', 'book');
+  // Pages used now and then sit under More, so the list stays short. Only clicking More opens or closes it
+  // (the first-run tour opens it while it points at one of them).
+  const MORE = [['shared', 'Shared games', 'share'], ['pc', 'Your PC', 'pc'], ['emulators', 'Emulators', 'emu'], ['firmware', 'Firmware & BIOS', 'shield'], ['backups', 'Save backups', 'save'], ['guide', 'Guide', 'book']];
+  const open = !!set().sideMore || tourMore;
+  html += `<h6>Forge</h6>` + nav('settings', 'Settings', 'gear')
+    + `<button class="nav more ${open ? 'open' : ''}" data-act="sideMore" aria-expanded="${open}">${ico('more')}<span>More</span><span class="mchev">${ico('chev', 14)}</span></button>`
+    + (open ? `<div class="sidemore">${MORE.map(([id, label, icon]) => nav(id, label, icon)).join('')}</div>` : '');
   if (html !== lastSide) { lastSide = html; $('#side').innerHTML = html; } // rebuilding restarts the neon animations: a visible flash
 }
-let lastSide = '', lastMain = '';
+let lastSide = '', lastMain = '', tourMore = false;
 
 // ---------------- views ----------------
 const V = {};
@@ -1737,7 +1763,10 @@ let tour = null; // { step }
 function startTour() { closeModal(); if (route.view === 'game') go('home'); tour = { step: 0 }; showTour(); }
 function showTour() {
   let box = $('#tour'); if (!box) { box = document.createElement('div'); box.id = 'tour'; document.body.appendChild(box); }
-  const steps = window.EF_TOUR, st = steps[tour.step], el = st.target && $(st.target);
+  const steps = window.EF_TOUR, st = steps[tour.step];
+  const more = /data-arg="(shared|pc|emulators|firmware|backups|guide)"/.test(st.target || ''); // pages under More
+  if (more !== tourMore) { tourMore = more; renderSide(); }
+  const el = st.target && $(st.target);
   if (el) el.scrollIntoView({ block: 'nearest' });
   const r = el && el.getBoundingClientRect(), pad = 6;
   const spot = r ? `<div class="tour-spot" style="left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px"></div>` : '<div class="tour-dim"></div>';
@@ -1750,7 +1779,7 @@ function showTour() {
       ${tour.step ? '<button class="btn sm" data-act="tourBack">Back</button>' : ''}<button class="btn primary sm" data-act="tourNext" id="tourNext">${tour.step === steps.length - 1 ? 'Done' : 'Next'}</button></div></div>`;
   setTimeout(() => { const n = $('#tourNext'); n && n.focus(); }, 20);
 }
-function endTour() { tour = null; const box = $('#tour'); if (box) box.remove(); if (!S.tourDone) { S.tourDone = true; save(); } }
+function endTour() { tour = null; const box = $('#tour'); if (box) box.remove(); if (tourMore) { tourMore = false; renderSide(); } if (!S.tourDone) { S.tourDone = true; save(); } }
 window.addEventListener('resize', () => { if (tour) showTour(); });
 
 // ---------------- setup wizard ----------------
@@ -1888,6 +1917,14 @@ const ACT = {
   wheelSetup: () => wheelStart('redo'),
   wheelNew: () => wheelStart('new'),
   wheelUse: (id) => useWheel(id),
+  sideMore: () => { set().sideMore = !set().sideMore; save(); renderSide(); },
+  wheelSoftOpen: async (i) => {
+    const w = set().wheel; if (!w) return;
+    const r = await window.ef.wheelSoft.open({ wheel: { vid: w.vid, pid: w.pid, name: w.name }, i: +i || 0 });
+    if (r && r.ok) toast(`Opening <b>${esc(r.label)}</b>. Changes there are saved on your wheel.`, 'ok'); else toast(esc((r && r.error) || 'Couldn’t open it.'), 'bad');
+  },
+  wheelSoftGet: async () => { const w = set().wheel; if (w) await window.ef.wheelSoft.get({ vid: w.vid, pid: w.pid, name: w.name }); },
+  wheelSoftWin: async () => { await window.ef.wheelSoft.windows(); toast('In Game Controllers, pick your wheel, then Properties › Settings › Calibrate.', 'ok'); },
   wheelSkip: () => { if (wheelCal) wheelNext(); },
   wheelCancel: () => { wheelCal = null; render(); },
   wheelRename: async () => {

@@ -694,6 +694,7 @@ require('./share').register({ ipcMain, getWin: () => win, gameUnit });
 require('./emu-updates').register({ ipcMain, getWin: () => win });
 require('./app-updates').register({ ipcMain, app, getWin: () => win, isPlaying: () => !!running });
 require('./pads').register({ ipcMain });
+require('./wheelsoft').register({ ipcMain, shell });
 pauseMenu.register({ ipcMain });
 require('./wheels').register({ ipcMain });
 pauseMenu.init({ globalShortcut, getWin: () => win, getRunning: () => running, quitGame: s => quitGame(s) });

@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('ef', {
   },
   downloads: { status: invoke('downloads:status'), check: invoke('downloads:check'), set: invoke('downloads:set') },
   pads: { status: invoke('pads:status'), setup: invoke('pads:setup'), pcsx2: invoke('pads:pcsx2') },
+  wheelSoft: { info: invoke('wheelsoft:info'), open: invoke('wheelsoft:open'), get: invoke('wheelsoft:get'), windows: invoke('wheelsoft:windows') },
   wheels: { rpcs3: invoke('wheel:rpcs3'), pcsx2: invoke('wheel:pcsx2'), padEnv: invoke('wheel:padEnv') },
   skins: { exportSkin: invoke('skin:export'), importSkin: invoke('skin:import'), saveWall: invoke('skin:saveWall') },
   appUpdates: {

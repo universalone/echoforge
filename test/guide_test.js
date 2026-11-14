@@ -5,7 +5,8 @@ const app = f => fs.readFileSync(path.join(__dirname, '..', 'app', f), 'utf8');
 const win = {}; vm.runInNewContext(app('data.js') + '\n' + app('guide.js'), { window: win });
 const renderer = app('renderer.js'), html = app('index.html');
 const views = new Set([...renderer.matchAll(/^V\.(\w+) =/gm)].map(m => m[1]));
-const navs = new Set([...renderer.matchAll(/nav\('(\w+)'/g)].map(m => m[1]));
+// Menu items: nav('id', …) calls, and the ['id', 'Label', 'icon'] rows of the More list.
+const navs = new Set([...renderer.matchAll(/nav\('(\w+)'/g), ...renderer.matchAll(/\['(\w+)', '[^']+', '\w+'\]/g)].map(m => m[1]));
 const consoles = new Set(win.EF_CONSOLES.map(c => c.id));
 
 let fails = 0;
