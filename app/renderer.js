@@ -690,6 +690,7 @@ async function play(gid) {
     const r = await window.ef.pads.setup({ exe: emuPath('rpcs3') });
     if (r.ok && r.kind) { toast(`Set up your ${esc(r.name)} for PS3 games.`, 'ok'); await checkBios('ps3'); }
   }
+  if (emuId === 'anyps5') toast(`Getting <b>${esc(tt(g))}</b> ready for AnyPS5. The first time, it’s ported to a Windows program, which can take a minute.`);
   blip('play');
   const res = c.launch === 'appx'
     ? await window.ef.launchAppx({ manifest: g.path, gameId: g.id, onLaunch: set().onLaunch, priority: set().priority, quitCombo: set().quitCombo, quitKey: set().quitKey, pauseMenu: set().pauseMenu, pauseKey: set().pauseKey, pauseFreeze: set().pauseFreeze, title: tt(g) })
@@ -1455,9 +1456,10 @@ V.emulators = () => { if (!emuUp.checked) setTimeout(() => checkEmuUpdates(false
       <div class="small muted" style="margin:6px 0 12px">${e.for.map(id => esc(byId(C, id).name)).join(' · ')}${e.note ? ' — ' + esc(e.note) : ''}</div>
       <div class="folder"><span class="p mono" title="${esc(p)}">${p ? esc(p) : '<span class="faint">No program selected</span>'}</span>${p ? driveBadge(p) : ''}</div>
       ${p && emuUp.ids.includes(e.id) ? emuUpdateRow(e.id) : ''}
-      <div class="setrow" style="border:0;padding:6px 0"><div class="lbl"><b>Launch options</b><span>{rom} = game file · {romdir} · {emudir} · {core}</span></div><input class="input mono" style="width:260px" data-emuargs="${e.id}" value="${esc(emuArgs(e.id))}"></div>
-      <div class="row"><button class="btn sm primary" data-act="pickEmu" data-arg="${e.id}">${p ? 'Change' : 'Locate'} .exe</button>
-        ${p ? `<button class="btn sm" data-act="runEmu" data-arg="${e.id}">Open emulator</button><button class="btn sm ghost" data-act="reveal" data-arg="${esc(p)}">Show folder</button>` : ''}
+      ${!p && e.install ? `<div class="row" style="margin-bottom:8px">${emuUp.busy === e.id ? `<span class="small muted" id="eu-${e.id}">${esc(emuUp.phase)} ${emuUp.pct}%</span>` : `<button class="btn sm primary" data-act="emuInstall" data-arg="${e.id}" ${emuUp.busy ? 'disabled' : ''}>Install ${esc(e.name)}</button><span class="small muted">From its official GitHub, checked against the published checksums.</span>`}</div>` : ''}
+      ${e.tool ? '' : `<div class="setrow" style="border:0;padding:6px 0"><div class="lbl"><b>Launch options</b><span>{rom} = game file · {romdir} · {emudir} · {core}</span></div><input class="input mono" style="width:260px" data-emuargs="${e.id}" value="${esc(emuArgs(e.id))}"></div>`}
+      <div class="row"><button class="btn sm ${p || !e.install ? 'primary' : 'ghost'}" data-act="pickEmu" data-arg="${e.id}">${p ? 'Change' : 'Locate'} .exe</button>
+        ${p ? `${e.tool ? '' : `<button class="btn sm" data-act="runEmu" data-arg="${e.id}">Open emulator</button>`}<button class="btn sm ghost" data-act="reveal" data-arg="${esc(p)}">Show folder</button>` : ''}
         <button class="btn sm ghost" data-act="url" data-arg="${esc(e.url)}">${ico('link', 14)} Official page</button>
         ${S.emulators[e.id] && S.emulators[e.id].args ? `<button class="btn sm ghost" data-act="resetArgs" data-arg="${e.id}">Reset options</button>` : ''}</div></div>`; }).join('')}</div></div>`; };
 
@@ -2102,6 +2104,17 @@ const ACT = {
     if (!r.ok) toast(esc(r.error), 'bad');
     else toast(r.already ? `${esc(name)} is already up to date.` : `${esc(name)} updated to <b>${esc(r.label)}</b>. If it gives you trouble, use Roll back on this page.`, 'ok');
     emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: emuPath(id), channel: emuChannel(id) }); render();
+  },
+  // First install of an emulator EchoForge can install itself (AnyPS5), with the same checked download as updates.
+  emuInstall: async (id) => {
+    if (emuUp.busy) return; const e = emuFor(id);
+    emuUp.busy = id; emuUp.pct = 0; emuUp.phase = 'Starting'; render();
+    const r = await window.ef.emuUpdates.install({ id, channel: emuChannel(id) }); emuUp.busy = null;
+    if (!r.ok) { render(); return toast(esc(r.error), 'bad'); }
+    S.emulators[id] = { ...(S.emulators[id] || {}), path: r.exe }; save();
+    const cons = e.for.map(c => byId(C, c).name).join(' or ');
+    toast(`${esc(e.name)} ${esc(r.label || '')} installed. To use it, choose ${esc(e.name)} on the ${esc(cons)} page’s Setup tab.`, 'ok');
+    emuUp.info[id] = await window.ef.emuUpdates.check({ id, exe: r.exe, channel: emuChannel(id) }); renderSide(); render();
   },
   emuRollback: async (id) => {
     const u = emuUp.info[id]; if (emuUp.busy || !u || !u.rollback) return; const name = emuFor(id).name;

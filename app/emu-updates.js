@@ -10,10 +10,14 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 
 // Only these emulators update, and only from these repositories. stable: the emulator marks real releases, and its
-// GitHub pre-releases are daily test builds.
+// GitHub pre-releases are daily test builds. extra: more files from the same release, each checked against its own
+// checksum and saved under the name given. installDir: EchoForge can also install it fresh, into this folder under
+// %LOCALAPPDATA%\Programs.
 const SOURCES = {
   kytyps5: { repo: 'KytyPS5/KytyPS5', asset: /-Windows-x64\.zip$/i, exe: ['kyty_emulator.exe'] },
-  shadps4: { repo: 'shadps4-emu/shadPS4', asset: /^shadps4-win64-.*\.zip$/i, exe: ['shadPS4.exe', 'shadps4.exe'], stable: true }
+  shadps4: { repo: 'shadps4-emu/shadPS4', asset: /^shadps4-win64-.*\.zip$/i, exe: ['shadPS4.exe', 'shadps4.exe'], stable: true },
+  // AnyPS5: its PS5 system libraries (a zip holding libs\) and the relinker that ports games (app/anyps5.js).
+  anyps5: { repo: 'boykopovar/AnyPS5', asset: /^prx-windows-v[\d.]+\.zip$/i, extra: [{ asset: /^relinker-v[\d.]+\.exe$/i, as: 'relinker.exe' }], exe: ['relinker.exe'], stable: true, installDir: 'AnyPS5' }
 };
 const API = process.env.EF_GH_API || 'https://api.github.com'; // EF_GH_API: test feed (dev aid)
 const SOURCE_FILE = 'ECHOFORGE_SOURCE.txt';
@@ -66,9 +70,12 @@ async function builds(src) {
   const out = [];
   for (const r of list) {
     if (r.draft) continue;
+    const signed = x => x && /^sha256:[0-9a-f]{64}$/i.test(x.digest || '');
     const a = (r.assets || []).find(x => src.asset.test(x.name));
-    if (!a || !/^sha256:[0-9a-f]{64}$/i.test(a.digest || '')) continue;
-    out.push({ tag: r.tag_name, label: label(r.tag_name), date: r.published_at, pre: !!r.prerelease, page: r.html_url, url: a.browser_download_url, name: a.name, size: a.size, sha256: a.digest.slice(7).toLowerCase() });
+    if (!signed(a)) continue;
+    const extra = (src.extra || []).map(e => { const x = (r.assets || []).find(y => e.asset.test(y.name)); return signed(x) ? { as: e.as, url: x.browser_download_url, name: x.name, size: x.size, sha256: x.digest.slice(7).toLowerCase() } : null; });
+    if (extra.some(e => !e)) continue; // a release missing one of its files isn't offered
+    out.push({ tag: r.tag_name, label: label(r.tag_name), date: r.published_at, pre: !!r.prerelease, page: r.html_url, url: a.browser_download_url, name: a.name, size: a.size, sha256: a.digest.slice(7).toLowerCase(), extra });
   }
   return out;
 }
@@ -151,6 +158,7 @@ async function update(id, exe, progress = () => {}, channel = 'latest') {
     if (!isNewer(all, rel, current)) return { ok: true, already: true, label: label(current) || rel.label };
     const arc = path.join(work, 'update.zip'); await download(rel, arc, progress);
     progress(82, 'Unpacking'); const stage = path.join(work, 'stage'); await unpack(arc, stage);
+    for (const x of rel.extra || []) { progress(84, 'Downloading'); await download(x, path.join(stage, x.as), () => {}); } // checked like the main file
     // Some archives wrap everything in one folder: install from wherever the emulator's exe is.
     const staged = await walk(stage), exeRel = staged.find(f => src.exe.some(x => path.basename(f).toLowerCase() === x.toLowerCase()));
     if (!exeRel) throw new Error('The update doesn’t contain the emulator program.');
@@ -185,6 +193,22 @@ async function update(id, exe, progress = () => {}, channel = 'latest') {
   finally { await fsp.rm(work, { recursive: true, force: true }).catch(() => {}); }
 }
 
+// First install, for sources with an installDir: the same checked download as an update, into a new folder under
+// %LOCALAPPDATA%\Programs. Returns the program's path.
+async function install(id, progress = () => {}, channel = 'tested') {
+  const src = SOURCES[id]; if (!src || !src.installDir) return { ok: false, error: 'EchoForge can’t install this emulator.' };
+  const dir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', src.installDir);
+  const exe = path.join(dir, src.exe[0]);
+  if (await exists(exe) && (await fsp.stat(exe)).size > 0) return { ok: true, already: true, exe };
+  const fresh = !(await exists(dir));
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.writeFile(exe, ''); // update() works on an existing install: this placeholder is replaced by the real program
+  const r = await update(id, exe, progress, channel === 'keep' ? 'tested' : channel);
+  if (!r.ok || r.already) { if (fresh) await fsp.rm(dir, { recursive: true, force: true }); else await fsp.rm(exe, { force: true }); return r.ok ? { ok: false, error: 'No Windows build was found.' } : r; }
+  await fsp.rm(path.join(backupRoot(), id), { recursive: true, force: true }); // nothing to roll back to on a first install
+  return { ...r, exe };
+}
+
 async function rollback(id, exe) {
   const dir = folderOf(exe); if (!SOURCES[id] || !dir) return { ok: false, error: 'EchoForge can’t roll this emulator back.' };
   const back = await lastBackup(id); if (!back) return { ok: false, error: 'There’s no earlier version saved.' };
@@ -202,6 +226,7 @@ function register({ ipcMain, getWin }) {
   ipcMain.handle('emuup:check', (_e, { id, exe, channel }) => check(id, exe, channel));
   ipcMain.handle('emuup:update', (_e, { id, exe, channel }) => update(id, exe, (pct, phase) => send('emuup:progress', { id, pct: Math.round(pct), phase }), channel));
   ipcMain.handle('emuup:rollback', (_e, { id, exe }) => rollback(id, exe));
+  ipcMain.handle('emuup:install', (_e, { id, channel }) => install(id, (pct, phase) => send('emuup:progress', { id, pct: Math.round(pct), phase }), channel).catch(e => ({ ok: false, error: e.message })));
 }
 
-module.exports = { register, check, update, rollback, label, SOURCES, TESTED_HOURS };
+module.exports = { register, check, update, install, rollback, label, SOURCES, TESTED_HOURS };

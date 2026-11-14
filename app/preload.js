@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('ef', {
     check: invoke('emuup:check'),
     update: invoke('emuup:update'),
     rollback: invoke('emuup:rollback'),
+    install: invoke('emuup:install'),
     onProgress: (fn) => ipcRenderer.on('emuup:progress', (_e, v) => fn(v))
   },
   share: {

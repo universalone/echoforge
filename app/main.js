@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { tally, binProblem, recycleAll } = require('./recycle');
 const appx = require('./appx');
+const anyps5 = require('./anyps5');
 
 const DATA_FILE = () => path.join(app.getPath('userData'), 'echoforge-data.json');
 const ICON = path.join(__dirname, 'assets', 'icon.png');
@@ -796,9 +797,16 @@ ipcMain.handle('emu:launch', async (_e, req) => {
   if (req.rom) { try { await fsp.access(req.rom); } catch { return { ok: false, error: 'The game file is missing. Is its drive plugged in?' }; } }
   const args = buildArgs(req.args || '', { rom: req.rom || '', romdir: req.rom ? path.dirname(req.rom) : '', core: req.core || '', emudir: path.dirname(req.exe) });
   if (!req.rom) { const i = args.indexOf(''); if (i >= 0) args.splice(i, 1); }
+  // AnyPS5 ports the game to a Windows program (the first time), then that program is what runs (app/anyps5.js).
+  let exe = req.exe, cwd = path.dirname(req.exe), runArgs = req.rom ? args : [], port = null;
+  if (req.emuId === 'anyps5') {
+    port = await anyps5.prepare(req.exe, req.rom, path.join(app.getPath('userData'), 'anyps5-ports'), phase => win.webContents.send('launch:phase', { gameId: req.gameId, phase }));
+    if (!port.ok) return { ok: false, error: port.error };
+    exe = port.exe; cwd = port.dir; runArgs = [];
+  }
   let child;
   try {
-    child = spawn(req.exe, req.rom ? args : [], { cwd: path.dirname(req.exe), detached: false, windowsHide: false, env: { ...process.env, ...(req.env || {}) } });
+    child = spawn(exe, runArgs, { cwd, detached: false, windowsHide: false, env: { ...process.env, ...(req.env || {}) } });
   } catch (err) { return { ok: false, error: String(err.message || err) }; }
   const started = Date.now();
   running = { child, gameId: req.gameId, started, title: req.title || '', emuId: req.emuId || '', freeze: req.pauseFreeze !== false };
@@ -806,12 +814,14 @@ ipcMain.handle('emu:launch', async (_e, req) => {
   child.stderr && child.stderr.on('data', d => { errOut = (errOut + d).slice(-2000); });
   child.on('error', err => { pauseMenu.close({ front: false }); quit.disarm(globalShortcut); win.webContents.send('game:exit', { gameId: req.gameId, seconds: 0, code: -1, error: err.message }); running = null; restoreWindow(); });
   armQuit(req);
-  child.on('exit', code => {
+  child.on('exit', async code => {
     const seconds = Math.round((Date.now() - started) / 1000);
     const quitting = running && running.quitting;
     pauseMenu.close({ front: false }); running = null; quit.disarm(globalShortcut);
     if (quitting) code = 0; // closed on purpose, not a crash
-    win.webContents.send('game:exit', { gameId: req.gameId, seconds, code, error: code && seconds < 5 ? (errOut.trim().split('\n').pop() || `Emulator closed with code ${code}`) : null });
+    // A ported AnyPS5 game is a GUI program: its errors are in anyps5.log beside it.
+    const early = code && seconds < 5 ? (errOut.trim().split('\n').pop() || (port && await anyps5.lastLog(port.dir)) || `Emulator closed with code ${code}`) : null;
+    win.webContents.send('game:exit', { gameId: req.gameId, seconds, code, error: early });
     restoreWindow(req.restoreFullscreen);
   });
   // Give the game the CPU: raise priority and get the launcher out of the way.

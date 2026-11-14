@@ -11,7 +11,7 @@ window.EF_GROUPS = [
 window.EF_CONSOLES = [
   {
     id: 'ps5', name: 'PlayStation 5', short: 'PS5', dir: 'Playstation 5', speed: 'fast', maker: 'Sony', group: 'next', year: 2020,
-    hue: ['#dfe7f5', '#6d8fd6'], emulators: ['kytyps5', 'sharpemu'],
+    hue: ['#dfe7f5', '#6d8fd6'], emulators: ['kytyps5', 'sharpemu', 'anyps5'],
     rule: { names: ['eboot.bin'] }, accept: 'ps5',
     ram: 10, maturity: 'experimental',
     formats: 'Game folder containing eboot.bin and sce_sys/param.json',
@@ -109,6 +109,10 @@ window.EF_EMULATORS = [
     args: '"{rom}"', url: 'https://github.com/KytyPS5', note: 'Boots a handful of titles. Not playable yet.' },
   { id: 'sharpemu', name: 'SharpEmu', for: ['ps5'], status: 'experimental', exe: ['SharpEmu.exe'], hint: ['sharpemu', 'sharp'],
     args: '"{rom}"', url: 'https://x.com/rpcs3/status/2078143991363571972', note: 'Community-driven since July 2026. The link is RPCS3’s post naming the official repos.' },
+  // AnyPS5 doesn't emulate: it ports a game to a Windows program the first time it's played (app/anyps5.js).
+  // tool: nothing to open and no launch options. install: EchoForge installs it from its GitHub (app/emu-updates.js).
+  { id: 'anyps5', name: 'AnyPS5', for: ['ps5'], status: 'experimental', exe: ['relinker.exe'], hint: ['anyps5'], args: '', tool: true, install: true,
+    url: 'https://github.com/boykopovar/AnyPS5', note: 'Ports a PS5 game to a Windows program the first time you play it, instead of emulating it. Very early: about one game is playable so far. Needs decrypted games from your own console.' },
   { id: 'windurango', name: 'WinDurango', for: ['xone'], status: 'experimental', exe: [], hint: ['durango'], nolink: true,
     args: '"{rom}"', url: 'https://github.com/WinDurango', note: 'Nothing to link: install each game with WinDurango’s steps and EchoForge starts it for you. Needs Windows Developer Mode. A few titles launch.' },
   { id: 'shadps4', name: 'shadPS4', for: ['ps4'], status: 'active', exe: ['shadPS4.exe', 'shadps4.exe'], hint: ['shadps4', 'shad'],
