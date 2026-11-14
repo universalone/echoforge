@@ -68,8 +68,10 @@ function g27Yaml(w, on) {
   // An unused part points at device 0, which no real controller has.
   const entry = (name, type, n, hat = '', reverse = false) => out.push(`${name}:`, `  device_type_id: ${type === 'none' ? 0 : id}`, `  type: ${type === 'none' ? 'button' : type}`, `  id: ${type === 'none' ? 255 : n}`, `  hat: ${hat ? hat : '""'}`, `  reverse: ${reverse}`);
   entry('steering', 'axis', w.steer);
-  // RPCS3 reads a pedal as released at the axis minimum; a pedal resting at the maximum is read reversed.
-  for (const k of ['throttle', 'brake', 'clutch']) { const p = w[k]; if (p) entry(k, 'axis', p.axis, '', p.rest > 0); else entry(k, 'none', 0); }
+  // RPCS3's G27 copies Logitech's own pedals, which read highest when released (LogitechG27.cpp: the axis becomes
+  // 0-255, and the G27 report has 00 = pressed, ff = released). So a pedal that rests at the axis minimum, like most
+  // other makes' (Moza, Fanatec, Thrustmaster), is reversed; one that rests at the maximum is left as it is.
+  for (const k of ['throttle', 'brake', 'clutch']) { const p = w[k]; if (p) entry(k, 'axis', p.axis, '', p.rest < 0); else entry(k, 'none', 0); }
   const b = w.buttons;
   entry('shift_up', b.shift_up != null ? 'button' : 'none', b.shift_up);
   entry('shift_down', b.shift_down != null ? 'button' : 'none', b.shift_down);

@@ -36,7 +36,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 // ---------------- state ----------------
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
-  wheel: null, wheelPcsx2Index: 1, skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
+  wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
   sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
@@ -73,6 +73,12 @@ function hydrate(raw) {
   if (!raw) return s;
   s.settings = { ...DEFAULTS, ...(raw.settings || {}) };
   if ((raw.settings || {}).splashSizeV !== 2) Object.assign(s.settings, { splashSize: 'hd', splashSizeV: 2 }); // the intro now opens at 1920 × 1080
+  // Wheel profiles (one per wheel or rim): a wheel set up before profiles existed becomes the first one.
+  s.settings.wheelProfiles = Array.isArray(s.settings.wheelProfiles) ? [...s.settings.wheelProfiles] : []; // its own list, never DEFAULTS' one
+  if (s.settings.wheel && !s.settings.wheelProfiles.length) {
+    s.settings.wheelProfiles.push({ id: 'w1', name: s.settings.wheel.name || 'My wheel', wheel: s.settings.wheel });
+    s.settings.wheelActive = 'w1';
+  }
   s.emulators = raw.emulators || {};
   for (const c of C) s.consoles[c.id] = { ...s.consoles[c.id], ...((raw.consoles || {})[c.id] || {}) };
   s.games = Array.isArray(raw.games) ? raw.games : [];
@@ -193,6 +199,18 @@ function confirmBox(title, body, okLabel = 'Confirm', danger = false) {
     ACT.cfNo = () => { modalOnClose = null; closeModal(); res(false); };
   });
 }
+// Asks for a short piece of text (a name). Resolves to the trimmed text, or null when cancelled.
+function textBox(title, body, value = '', okLabel = 'Save') {
+  return new Promise(res => {
+    modal(`<h3>${esc(title)}</h3><p class="muted">${body}</p>
+      <input class="input" id="tbInput" maxlength="40" value="${esc(value)}" style="width:100%;margin:4px 0 8px" data-autofocus>
+      <div class="foot"><button class="btn ghost" data-act="tbNo">Cancel</button><button class="btn primary" data-act="tbYes">${esc(okLabel)}</button></div>`, { onClose: () => res(null) });
+    const done = v => { modalOnClose = null; closeModal(); res(v); };
+    ACT.tbYes = () => { const v = ($('#tbInput').value || '').trim(); if (v) done(v.slice(0, 40)); };
+    ACT.tbNo = () => done(null);
+    setTimeout(() => { const i = $('#tbInput'); if (!i) return; i.select(); i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ACT.tbYes(); } }); }, 40);
+  });
+}
 
 // ---------------- appearance ----------------
 function applyLook() {
@@ -231,13 +249,26 @@ let wheelCal = null;
 // Which games support wheels (app/wheelgames.js). Listed PS3 / PS2 games use the wheel unless you turned it off.
 const WG = window.EF_WHEELGAMES;
 const wheelSupport = g => WG.support(g.console, g.title);
-const wheelOn = g => g.wheel ?? (wheelSupport(g) === 'yes' && WG.connected(g.console));
+// On unless the game's page says otherwise: for PS2/PS3 games on the wheel list, and for Xbox 360 racing games whose
+// PS3 or PS2 version is on it (Xenia gets the wheel as a controller; DiRT 3 is one). Other games: off until switched on.
+const wheelOn = g => g.wheel ?? ((wheelSupport(g) === 'yes' && WG.connected(g.console))
+  || (WHEEL_PAD_CONSOLES.includes(g.console) && (WG.support('ps3', g.title) === 'yes' || WG.support('ps2', g.title) === 'yes')));
 // Xbox 360 (Xenia) has no wheel emulation: there the wheel is handed over as an Xbox controller (see wheels.js padMapping).
 const WHEEL_PAD_CONSOLES = ['x360'];
 const wheelUsable = c => WG.connected(c) || WHEEL_PAD_CONSOLES.includes(c);
 const wheelGames = () => S.games.filter(g => !g.hidden && WG.connected(g.console) && wheelSupport(g) === 'yes').sort((a, b) => tt(a).localeCompare(tt(b)));
 const wheelPad = () => [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.connected && isWheel(g)) || null;
-function wheelStart() { wheelCal = { step: 0, found: { buttons: {} }, id: '', note: '' }; wheelStep(); render(); requestAnimationFrame(wheelPoll); }
+// Wheel profiles: one saved layout per wheel or rim (rims on the same base change which buttons are where). The active
+// one is copied to set().wheel, which is what games use.
+const wheelProfiles = () => set().wheelProfiles || [];
+const activeWheel = () => wheelProfiles().find(p => p.id === set().wheelActive) || null;
+function useWheel(id, quiet = false) {
+  const p = wheelProfiles().find(x => x.id === id); if (!p) return;
+  set().wheelActive = p.id; set().wheel = p.wheel; save(); render();
+  if (!quiet) toast(`Using <b>${esc(p.name)}</b>.`, 'ok');
+}
+// mode 'new' makes another profile; 'redo' learns the active one again.
+function wheelStart(mode = 'redo') { wheelCal = { step: 0, found: { buttons: {} }, id: '', note: '', mode }; wheelStep(); render(); requestAnimationFrame(wheelPoll); }
 function wheelStep() { const gp = wheelPad(); if (!wheelCal) return; if (gp && wheelCal.waitHat != null && Math.abs(gp.axes[wheelCal.waitHat]) <= 1.01) { setTimeout(wheelStep, 60); return; } wheelCal.waitHat = null; wheelCal.rest = gp ? [...gp.axes] : null; wheelCal.lo = wheelCal.rest && [...wheelCal.rest]; wheelCal.hi = wheelCal.rest && [...wheelCal.rest]; wheelCal.btn = gp ? gp.buttons.map(b => b.pressed) : null; wheelCal.moving = null; }
 function wheelNext() { wheelCal.step++; if (wheelCal.step >= WHEEL_STEPS.length) return wheelFinish(); wheelStep(); render(); }
 function wheelSay(t) { const el = $('#wheelNote'); if (el && el.textContent !== t) el.textContent = t; }
@@ -280,13 +311,23 @@ function wheelPoll() {
   if (b >= 0) { f.buttons[st.k] = b; return wheelNext(); }
   wheelSay('Waiting for a button…');
 }
-function wheelFinish() {
+async function wheelFinish() {
   const f = wheelCal.found, m = /Vendor:\s*([0-9a-f]{4})\s*Product:\s*([0-9a-f]{4})/i.exec(wheelCal.id);
-  const name = wheelCal.id.replace(/\(.*\)/, '').trim() || 'Racing wheel';
+  const name = wheelCal.id.replace(/\(.*\)/, '').trim() || 'Racing wheel', mode = wheelCal.mode;
   wheelCal = null;
   if (!m || f.steer == null) { render(); return toast('EchoForge couldn’t read that wheel’s details. Try Set up my wheel again.', 'bad'); }
-  set().wheel = { name, vid: m[1], pid: m[2], steer: f.steer, throttle: f.throttle || null, brake: f.brake || null, clutch: f.clutch || null, buttons: f.buttons, hatAxis: Number.isInteger(f.hatAxis) ? f.hatAxis : undefined };
-  save(); render(); toast(`<b>${esc(name)}</b> is set up. Turn on “Use racing wheel” on a PS3 or PS2 racing game’s page.`, 'ok');
+  const wheel = { name, vid: m[1], pid: m[2], steer: f.steer, throttle: f.throttle || null, brake: f.brake || null, clutch: f.clutch || null, buttons: f.buttons, hatAxis: Number.isInteger(f.hatAxis) ? f.hatAxis : undefined };
+  const cur = activeWheel();
+  if (mode === 'redo' && cur) { // the same profile, learned again
+    cur.wheel = wheel; useWheel(cur.id, true);
+    return toast(`<b>${esc(cur.name)}</b> is set up again.`, 'ok');
+  }
+  const list = wheelProfiles();
+  const suggest = list.length ? `${name} rim ${list.length + 1}` : name;
+  const label = await textBox('Name this wheel profile', 'For example the rim’s name, like “Formula rim” or “GT rim”. You can switch profiles any time in Settings › Controller.', suggest);
+  const p = { id: 'w' + Date.now().toString(36), name: label || suggest, wheel };
+  set().wheelProfiles = [...list, p]; useWheel(p.id, true);
+  toast(list.length ? `Saved <b>${esc(p.name)}</b> and switched to it.` : `<b>${esc(p.name)}</b> is set up. Turn on “Use racing wheel” on a racing game’s page.`, 'ok');
 }
 function wheelPanelHTML() {
   const w = set().wheel;
@@ -298,13 +339,16 @@ function wheelPanelHTML() {
       <div class="small" id="wheelNote" role="status"></div>
       <div class="row" style="margin-top:12px">${wheelCal.id && st.skip ? `<button class="btn sm" data-act="wheelSkip">${esc(st.skip)}</button>` : ''}<button class="btn sm ghost" data-act="wheelCancel">Cancel</button></div></div>`;
   }
-  if (!w) return `<div class="small muted" style="margin-bottom:10px">No wheel set up yet. Plug in and turn on your wheel, then press the button and follow the steps. It takes about a minute.</div><button class="btn primary" data-act="wheelSetup">Set up my wheel</button>`;
+  if (!w) return `<div class="small muted" style="margin-bottom:10px">No wheel set up yet. Plug in and turn on your wheel, then press the button and follow the steps. It takes about a minute.</div><button class="btn primary" data-act="wheelNew">Set up my wheel</button>`;
   const ax = p => p ? `axis ${p.axis}` : 'none';
   const dp = ['dpad_up', 'dpad_down', 'dpad_left', 'dpad_right'].map(k => (w.buttons || {})[k]), dpad = dp.every(v => v == null) ? 'no D-pad' : dp.every(v => v === 'hat') ? 'D-pad (hat)' : 'D-pad';
-  return `<div class="small" style="margin-bottom:10px"><b>${esc(w.name)}</b> · steering axis ${w.steer} · throttle ${ax(w.throttle)} · brake ${ax(w.brake)} · clutch ${ax(w.clutch)} · ${Object.keys(w.buttons || {}).filter(k => !k.startsWith('dpad_')).length} buttons · ${dpad}</div>
+  const cur = activeWheel(), list = wheelProfiles();
+  return `<div class="small" style="margin-bottom:6px"><b>Profiles</b> <span class="muted">· one for each wheel or rim. Games use the one that’s selected.</span></div>
+    <div class="row" style="margin-bottom:12px;flex-wrap:wrap">${list.map(p => `<button class="btn sm ${p.id === set().wheelActive ? 'primary' : 'ghost'}" data-act="wheelUse" data-arg="${esc(p.id)}" aria-pressed="${p.id === set().wheelActive}">${esc(p.name)}</button>`).join('')}<button class="btn sm" data-act="wheelNew">+ New profile</button></div>
+    <div class="small" style="margin-bottom:10px"><b>${esc(cur ? cur.name : w.name)}</b>${cur && cur.name !== w.name ? ` <span class="muted">(${esc(w.name)})</span>` : ''} · steering axis ${w.steer} · throttle ${ax(w.throttle)} · brake ${ax(w.brake)} · clutch ${ax(w.clutch)} · ${Object.keys(w.buttons || {}).filter(k => !k.startsWith('dpad_')).length} buttons · ${dpad}</div>
     <div class="small muted" style="margin-bottom:10px">PS3 games use it as a Logitech G27 and PS2 games as a Logitech Driving Force, in games that support those wheels. Games on EchoForge’s list of wheel games use it automatically; for others, press “Use racing wheel” on the game’s page. Xbox 360 games can use it as an Xbox controller (steering on the stick, pedals on the triggers). PS4, PS5 and Xbox One emulators don’t support wheels yet.</div>
     ${(() => { const list = wheelGames(); return `<div class="small" style="margin-bottom:10px"><b>Your wheel games:</b> ${list.length ? list.slice(0, 20).map(g => `<button class="linkbtn" data-act="openGame" data-arg="${g.id}">${esc(tt(g))}</button>`).join(', ') + (list.length > 20 ? ` and ${list.length - 20} more` : '') : 'none of your PS3 or PS2 games is on the list yet. Racing games such as Gran Turismo 4, 5 and 6, DiRT, GRID and Need for Speed Shift support wheels.'}</div>`; })()}
-    <div class="row"><button class="btn sm" data-act="wheelSetup">Set up again</button><button class="btn sm ghost" data-act="wheelRemove">Remove</button></div>`;
+    <div class="row"><button class="btn sm" data-act="wheelSetup">Set up this profile again</button><button class="btn sm ghost" data-act="wheelRename">Rename</button><button class="btn sm ghost" data-act="wheelRemove">Delete profile</button></div>`;
 }
 
 // ---------------- Home dashboards ----------------
@@ -1642,6 +1686,7 @@ V.game = (gid) => {
           <button class="btn lg ${g.fav ? 'primary' : 'ghost'}" data-act="fav" data-arg="${g.id}">${ico('star', 16)} ${g.fav ? 'Favorited' : 'Favorite'}</button>
           <button class="btn lg ${(set().pinned || []).includes(g.id) ? 'primary' : 'ghost'}" data-act="pin" data-arg="${g.id}">${(set().pinned || []).includes(g.id) ? 'Pinned to Home' : 'Pin to Home'}</button>
           ${set().wheel && wheelUsable(g.console) ? `<button class="btn lg ${wheelOn(g) ? 'primary' : 'ghost'}" data-act="wheelGame" data-arg="${g.id}" title="Uses your ${esc(set().wheel.name)} in this game">${wheelOn(g) ? 'Racing wheel on' : 'Use racing wheel'}</button>` : ''}
+          ${set().wheel && wheelUsable(g.console) && wheelOn(g) && wheelProfiles().length > 1 ? `<button class="btn lg ghost" data-act="wheelNextRim" title="Switch to your next wheel profile">Rim: ${esc((activeWheel() || { name: set().wheel.name }).name)}</button>` : ''}
           ${(() => { const ws = wheelSupport(g); return ws === 'yes' ? `<span class="pill ok" title="On EchoForge’s list of games that support racing wheels">Supports racing wheels${WG.connected(g.console) ? '' : ' · EchoForge can’t connect wheels for this console yet'}</span>` : ws === 'no' ? '<span class="pill warn" title="Logitech lists this game as not working with wheels">Doesn’t support wheels</span>' : WHEEL_PAD_CONSOLES.includes(g.console) && set().wheel && wheelOn(g) ? '<span class="pill info" title="Xenia has no wheel emulation, so the wheel is used as an Xbox controller">Wheel as a controller: steering on the stick, pedals on the triggers, no force feedback</span>' : ''; })()}
           ${k && k.url ? `<button class="btn lg ghost" data-act="url" data-arg="${esc(k.url)}">Tester report</button>` : ''}</div>
         ${(k && k.tips || []).map(t => `<div class="small muted" style="margin-top:8px">Tip: ${esc(t)}</div>`).join('')}
@@ -1840,10 +1885,28 @@ const ACT = {
     if (src && src.kind === 'custom') { set().layouts = myLayouts().map(l => l.id === src.id ? { ...l, ...core } : l); return useLayout(src.id, core.skin); }
     ACT.homeSaveNew();
   },
-  wheelSetup: () => wheelStart(),
+  wheelSetup: () => wheelStart('redo'),
+  wheelNew: () => wheelStart('new'),
+  wheelUse: (id) => useWheel(id),
   wheelSkip: () => { if (wheelCal) wheelNext(); },
   wheelCancel: () => { wheelCal = null; render(); },
-  wheelRemove: async () => { if (!await confirmBox('Remove the racing wheel?', 'EchoForge forgets the wheel’s layout and turns the emulated wheel off in RPCS3 and PCSX2 the next time you play.', 'Remove', true)) return; set().wheel = null; save(); render(); },
+  wheelRename: async () => {
+    const cur = activeWheel(); if (!cur) return;
+    const name = await textBox('Rename this wheel profile', 'A name you’ll recognise, like the rim’s.', cur.name); if (!name) return;
+    cur.name = name; save(); render();
+  },
+  // Deletes the selected profile; the next one is used, or none (the emulated wheel is turned off at the next game).
+  wheelRemove: async () => {
+    const cur = activeWheel(), list = wheelProfiles();
+    const name = cur ? cur.name : 'the racing wheel';
+    if (!await confirmBox(`Delete ${name}?`, list.length > 1 ? 'EchoForge forgets this profile’s layout and switches to your next profile.' : 'EchoForge forgets the wheel’s layout and turns the emulated wheel off in RPCS3 and PCSX2 the next time you play.', 'Delete', true)) return;
+    set().wheelProfiles = list.filter(p => p !== cur);
+    const next = set().wheelProfiles[0];
+    if (next) useWheel(next.id, true); else { set().wheel = null; set().wheelActive = ''; save(); render(); }
+    toast(`Deleted ${esc(name)}.${next ? ` Using <b>${esc(next.name)}</b>.` : ''}`, 'ok');
+  },
+  // Game page: the next saved profile, for swapping rims without going to Settings.
+  wheelNextRim: () => { const list = wheelProfiles(); if (list.length < 2) return; const i = list.findIndex(p => p.id === set().wheelActive); useWheel(list[(i + 1) % list.length].id); },
   wheelGame: (id) => {
     const g = game(id); g.wheel = !wheelOn(g); save(); openGame(id); render();
     const ws = wheelSupport(g);

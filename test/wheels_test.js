@@ -31,8 +31,9 @@ const ID = String((4n | (0x346en << 16n) | (8n << 32n) | (1n << 42n) | (128n << 
   let y = fs.readFileSync(g27, 'utf8');
   check('PS3: turns the G27 on for the game', r.ok && /^enabled: true$/m.test(y));
   check('PS3: steering is the wheel’s axis', y.includes(`steering:\n  device_type_id: ${ID}\n  type: axis\n  id: 0\n`));
-  check('PS3: a pedal resting at + is reversed', y.includes(`brake:\n  device_type_id: ${ID}\n  type: axis\n  id: 3\n  hat: ""\n  reverse: true`));
-  check('PS3: the gas pedal isn’t', /^throttle:\n(?: {2}.*\n){4} {2}reverse: false/m.test(y));
+  // RPCS3's G27 reads a released pedal at the top of the axis, like Logitech's own pedals.
+  check('PS3: a pedal resting at + (like Logitech’s) isn’t reversed', y.includes(`brake:\n  device_type_id: ${ID}\n  type: axis\n  id: 3\n  hat: ""\n  reverse: false`));
+  check('PS3: a pedal resting at − (like Moza’s) is reversed, so released reads as released', /^throttle:\n(?: {2}.*\n){4} {2}reverse: true/m.test(y));
   check('PS3: buttons are mapped', y.includes(`cross:\n  device_type_id: ${ID}\n  type: button\n  id: 0`) && y.includes(`pause:\n  device_type_id: ${ID}\n  type: button\n  id: 9`));
   check('PS3: D-pad on the hat, or a button', y.includes(`\nup:\n  device_type_id: ${ID}\n  type: hat\n  id: 0\n  hat: up`) && y.includes(`\nleft:\n  device_type_id: ${ID}\n  type: button\n  id: 14`));
   check('PS3: unused parts point at no device', /^clutch:\n {2}device_type_id: 0\n/m.test(y));

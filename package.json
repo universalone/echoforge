@@ -1,7 +1,7 @@
 {
   "name": "echoforge",
   "productName": "EchoForge",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "EchoForge - next-gen console emulation launcher",
   "author": "EchoForge contributors",
   "main": "app/main.js",
