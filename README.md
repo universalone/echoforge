@@ -2,7 +2,18 @@
 
 **Next-gen emulation, reforged.** A launcher for PS5, Xbox One, PS4, PS3, Xbox 360, Xbox, Wii, PS2, GameCube, PS1 and PSP, with one library across every drive.
 
-> **Early preview (v0.1).** Expect rough edges. It has mostly been used on one PC, and the installer isn't code-signed yet. PS5 and Xbox One support is experimental: those emulators boot only a few titles and most games won't play.
+**[Download the latest release](https://github.com/universalone/echoforge/releases/latest)** (Windows). EchoForge contains no games, firmware, BIOS files or keys: use games you made from discs you own.
+
+![EchoForge Home: continue where you left off, your stats and recently played games](docs/screenshots/home.jpg)
+
+| | |
+|---|---|
+| ![All Games: every console's games in one library, with “will it run?” badges](docs/screenshots/library.jpg) | ![A game's page: art, a summary from Wikipedia, screenshots and one-click Play](docs/screenshots/game.jpg) |
+| **One library.** Every console's games together, with box art and “will it run?” badges from the emulators' own testers. | **A page for every game.** Art, a summary, screenshots, play time and one-click Play. |
+| ![Retro Forge: the EchoForge Retro Gaming library inside EchoForge](docs/screenshots/retro-forge.jpg) | ![Racing wheel settings: a profile for each rim and calibration in the wheel maker's software](docs/screenshots/racing-wheel.jpg) |
+| **Retro Forge.** The classics (NES to arcade) from EchoForge Retro Gaming, one click away. | **Racing wheels.** A profile for each rim, set up once and used in PS3, PS2 and Xbox 360 games. |
+
+> **Early preview (v0.2).** Expect rough edges. It has mostly been used on one PC, and the installer isn't code-signed yet. PS5 and Xbox One support is experimental: those emulators boot only a few titles and most games won't play.
 
 ## Run it
 ```bash
