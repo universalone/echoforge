@@ -26,7 +26,8 @@ let running = null; // { child, gameId, started }
 
 if (process.env.EF_PROFILE) app.setPath('userData', process.env.EF_PROFILE); // isolated test profile
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+// Opening EchoForge again brings this window forward (it's checked first: a window that's gone can't be shown).
+app.on('second-instance', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
 // Hardware acceleration can be turned off from Settings → Advanced (takes effect on restart).
 try {
@@ -50,14 +51,19 @@ function splashSettings(o) {
   return { style, file: style === 'custom' ? file : '', size,
     min: Math.min(10, Math.max(1, Number(st.splashMin) || 2.4)), toEnd: st.splashToEnd !== false, sound: !!st.splashSound, fit: st.splashFit === 'contain' ? 'contain' : 'cover' };
 }
+// 1920 × 1080 (or the largest 16:9 that fits a smaller screen), centered on the main screen: on a screen spanning
+// several monitors it sits on the middle one. The intro and the main window both open at this size.
+function hdBounds() {
+  const { screen } = require('electron');
+  const area = screen.getPrimaryDisplay().bounds, k = Math.min(1, area.width / 1920, area.height / 1080);
+  const width = Math.round(1920 * k), height = Math.round(1080 * k);
+  return { x: Math.round(area.x + (area.width - width) / 2), y: Math.round(area.y + (area.height - height) / 2), width, height };
+}
 function openSplash(o) {
   const { screen } = require('electron');
   const area = screen.getPrimaryDisplay().bounds;
-  // 1920 × 1080 (or the largest 16:9 that fits a smaller screen), centered: on a screen spanning several monitors it
-  // sits on the middle one.
-  const hd = Math.min(1, area.width / 1920, area.height / 1080);
   const dims = o.size === 'full' ? { x: area.x, y: area.y, width: area.width, height: area.height }
-    : o.size === 'hd' ? { x: Math.round(area.x + (area.width - 1920 * hd) / 2), y: Math.round(area.y + (area.height - 1080 * hd) / 2), width: Math.round(1920 * hd), height: Math.round(1080 * hd) }
+    : o.size === 'hd' ? hdBounds()
     : o.size === 'large' ? { width: 980, height: 560 } : { width: 560, height: 380 };
   const w = new BrowserWindow({
     ...dims, frame: false, transparent: !['full', 'hd'].includes(o.size), backgroundColor: ['full', 'hd'].includes(o.size) ? '#000000' : undefined, resizable: false,
@@ -106,12 +112,15 @@ ipcMain.handle('splash:preview', async (_e, st) => {
 
 function createMain() {
   win = new BrowserWindow({
-    width: 1440, height: 880, minWidth: 1040, minHeight: 640,
+    ...hdBounds(), minWidth: 1040, minHeight: 640, // opens at 1920 × 1080 every time
     frame: false, backgroundColor: '#0b0c10', show: false, icon: ICON,
     title: 'EchoForge',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true }
   });
   win.loadFile(path.join(__dirname, 'index.html'));
+  // Closing the main window quits EchoForge. Other windows (the in-game menu is a hidden one) would otherwise keep it
+  // running unseen, and opening it again then found a window that no longer existed.
+  win.on('closed', () => { win = null; app.quit(); });
   win.on('maximize', () => win.webContents.send('win:state', true));
   win.on('unmaximize', () => win.webContents.send('win:state', false));
   // Links never open inside the app.
@@ -122,7 +131,7 @@ function createMain() {
 
 app.whenReady().then(() => {
   // Only picture files are served, and only to EchoForge's own window.
-  // With w=, a smaller copy is served (made once, kept in userData	humbs): a 184-pixel card doesn't need a
+  // With w=, a smaller copy is served (made once, kept in userData\thumbs): a 184-pixel card doesn't need a
   // 1920-pixel picture decoded in memory.
   protocol.handle('efimg', async req => {
     const q = new URL(req.url).searchParams, p = q.get('p') || '', w = Math.min(2000, parseInt(q.get('w'), 10) || 0);
