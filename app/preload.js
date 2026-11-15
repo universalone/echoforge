@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('ef', {
   readImage: invoke('fs:readImage'),
   imageUrl: invoke('fs:imageUrl'),
   retroStart: invoke('retro:start'),
+  retroInstall: invoke('retro:install'),
+  onRetroInstallProgress: (fn) => ipcRenderer.on('retro:installProgress', (_e, v) => fn(v)),
   dropImageMemory: () => webFrame.clearCache(),
   mkdirs: invoke('fs:mkdirs'),
   scan: invoke('fs:scan'),

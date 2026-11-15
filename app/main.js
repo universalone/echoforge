@@ -343,7 +343,7 @@ ipcMain.handle('retro:start', async () => {
   if (await retroUp()) return { ok: true, url: RETRO_URL };
   const dir = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'EchoForge Retro Gaming');
   const py = path.join(dir, 'python', 'pythonw.exe'), script = path.join(dir, 'app', 'jl_retro.pyw');
-  if (!fs.existsSync(py) || !fs.existsSync(script)) return { ok: false, error: 'EchoForge Retro Gaming isn’t installed on this PC.' };
+  if (!fs.existsSync(py) || !fs.existsSync(script)) return { ok: false, notInstalled: true, error: 'EchoForge Retro Gaming isn’t installed on this PC.' };
   try { spawn(py, [script, '--no-window'], { cwd: path.dirname(script), detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
   catch (e) { return { ok: false, error: e.message }; }
   for (let i = 0; i < 60; i++) { await new Promise(r => setTimeout(r, 300)); if (await retroUp()) return { ok: true, url: RETRO_URL }; }
@@ -717,6 +717,7 @@ require('./emu-updates').register({ ipcMain, getWin: () => win });
 require('./app-updates').register({ ipcMain, app, getWin: () => win, isPlaying: () => !!running });
 require('./pads').register({ ipcMain });
 require('./wheelsoft').register({ ipcMain, shell });
+require('./retro-install').register({ ipcMain, getWin: () => win });
 pauseMenu.register({ ipcMain });
 require('./wheels').register({ ipcMain });
 pauseMenu.init({ globalShortcut, getWin: () => win, getRunning: () => running, quitGame: s => quitGame(s) });

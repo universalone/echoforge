@@ -2289,12 +2289,22 @@ async function openRetro() {
   if (box.firstChild) { go('retro'); retroFocus(); return; }
   if (retroBusy) return; retroBusy = true;
   toast('Starting Retro Forge…');
-  const r = await window.ef.retroStart().finally(() => { retroBusy = false; });
+  let r = await window.ef.retroStart().finally(() => { retroBusy = false; });
+  // Not installed yet: EchoForge installs it from Retro's GitHub (app/retro-install.js), then starts it.
+  if (r && r.notInstalled) {
+    if (!await confirmBox('Install EchoForge Retro Gaming?', 'Retro Forge is EchoForge Retro Gaming, the launcher for classic consoles (NES to arcade) through RetroArch. EchoForge downloads it from its official GitHub page (about 18 MB), checks it against the published checksum and installs it. It adds itself to the Start menu and Windows’ list of apps, and keeps itself up to date.', 'Install')) return;
+    retroBusy = true; toast('Installing EchoForge Retro Gaming… <span id="retroPct">0%</span>');
+    const inst = await window.ef.retroInstall().finally(() => { retroBusy = false; });
+    if (!inst.ok) return toast(esc(inst.error), 'bad');
+    toast(`EchoForge Retro Gaming ${esc(inst.version || '')} installed.`, 'ok');
+    retroBusy = true; r = await window.ef.retroStart().finally(() => { retroBusy = false; });
+  }
   if (!r || !r.ok) { toast(esc((r && r.error) || 'Retro Forge didn’t start.'), 'bad'); return; }
   const f = document.createElement('iframe');
   f.src = r.url; f.title = 'EchoForge Retro Gaming'; f.allow = 'gamepad; fullscreen; autoplay';
   box.appendChild(f); go('retro'); f.addEventListener('load', retroFocus);
 }
+window.ef.onRetroInstallProgress(v => { const el = $('#retroPct'); if (el) el.textContent = `${v.phase} ${v.pct}%`; });
 function retroFocus() { const f = $('#retroFrame iframe'); if (f && route.view === 'retro') setTimeout(() => f.focus(), 50); }
 function moveFocus(dir) {
   const list = focusables(); const cur = document.activeElement && list.includes(document.activeElement) ? document.activeElement : null;
