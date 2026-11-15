@@ -38,7 +38,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 // ---------------- state ----------------
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
-  sideMore: false, wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
+  sideMore: false, gameScreen: true, wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
   sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
@@ -697,7 +697,7 @@ async function play(gid) {
     : await window.ef.launch({ exe: emuPath(emuId), args: g.args || emuArgs(emuId), rom: g.path, core: conf.core, gameId: g.id,
       // Wheel games: SDL 3.4's raw GameInput hides DirectInput wheels (like the Moza R5) from RPCS3, so it's turned off.
       // Xbox 360: the wheel is handed to Xenia as an Xbox controller through an SDL controller mapping.
-      env: !set().wheel || !wheelOn(g) ? undefined : WHEEL_PAD_CONSOLES.includes(g.console) ? (await window.ef.wheels.padEnv({ profile: set().wheel })) || undefined : WG.connected(g.console) ? { SDL_JOYSTICK_GAMEINPUT_RAW: '0' } : undefined, onLaunch: set().onLaunch, priority: set().priority, quitCombo: set().quitCombo, quitKey: set().quitKey, pauseMenu: set().pauseMenu, pauseKey: set().pauseKey, pauseFreeze: set().pauseFreeze, title: tt(g), emuId });
+      env: !set().wheel || !wheelOn(g) ? undefined : WHEEL_PAD_CONSOLES.includes(g.console) ? (await window.ef.wheels.padEnv({ profile: set().wheel })) || undefined : WG.connected(g.console) ? { SDL_JOYSTICK_GAMEINPUT_RAW: '0' } : undefined, onLaunch: set().onLaunch, priority: set().priority, quitCombo: set().quitCombo, quitKey: set().quitKey, pauseMenu: set().pauseMenu, pauseKey: set().pauseKey, pauseFreeze: set().pauseFreeze, gameScreen: set().gameScreen !== false, title: tt(g), emuId });
   if (res.needsInstall) { blip('err'); return modal(`<h3>${esc(tt(g))} needs installing first</h3><p class="muted">${esc(res.error)}</p><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="guide">Open the Guide</button></div>`); }
   if (!res.ok) { blip('err'); return modal(`<h3>Couldn’t start the game</h3><div class="issue">${esc(res.error)}</div><div class="foot"><button class="btn ghost" data-act="close">Close</button><button class="btn primary" data-act="go" data-arg="emulators">Check emulator</button></div>`); }
   running = { gid: g.id, started: Date.now() };
@@ -1551,6 +1551,7 @@ const SETTINGS = [
     ['pauseKey', 'Menu shortcut', 'Keys that open the in-game menu. Example: Ctrl+Shift+P. Leave empty to turn it off.', 'text'],
     ['pauseFreeze', 'Pause the game while the menu is open', 'EchoForge freezes the emulator until you pick Resume, so nothing happens in the game behind the menu.', 'toggle'],
     ['quitKey', 'Quit shortcut', 'Keys that close the game and bring you back, even while the game has the screen. Example: Ctrl+Shift+Q. Leave empty to turn it off.', 'text'],
+    ['gameScreen', 'Games on the middle screen', 'With three screens (or one wide screen made of three, like NVIDIA Surround), games open on the middle one in a borderless 1920 × 1080 window instead of stretching across all of them. With one screen, games go fullscreen as usual.', 'toggle'],
     ['ramGuard', 'Low-memory warning', 'Warns before launch if free RAM is below what the console needs.', 'toggle'],
     ['playtime', 'Track play time', '', 'toggle'],
     ['disableGpu', 'Software rendering for EchoForge', 'Only if the launcher itself glitches. Needs a restart.', 'toggle']

@@ -16,6 +16,16 @@ const { spawn, execFile } = require('child_process');
 const { tally, binProblem, recycleAll } = require('./recycle');
 const appx = require('./appx');
 const anyps5 = require('./anyps5');
+const screens = require('./screens');
+// Moves a game's window onto the game screen once it appears (app/winplace.ps1, run hidden for the first minute).
+function placeOnGameScreen(pid, r) {
+  const script = path.join(__dirname.replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked'), 'winplace.ps1');
+  if (!fs.existsSync(script)) return;
+  try {
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
+      '-ProcId', String(pid), '-X', String(r.x), '-Y', String(r.y), '-W', String(r.width), '-H', String(r.height)], { windowsHide: true, stdio: 'ignore' });
+  } catch {}
+}
 
 const DATA_FILE = () => path.join(app.getPath('userData'), 'echoforge-data.json');
 const ICON = path.join(__dirname, 'assets', 'icon.png');
@@ -51,11 +61,13 @@ function splashSettings(o) {
   return { style, file: style === 'custom' ? file : '', size,
     min: Math.min(10, Math.max(1, Number(st.splashMin) || 2.4)), toEnd: st.splashToEnd !== false, sound: !!st.splashSound, fit: st.splashFit === 'contain' ? 'contain' : 'cover' };
 }
-// 1920 × 1080 (or the largest 16:9 that fits a smaller screen), centered on the main screen: on a screen spanning
-// several monitors it sits on the middle one. The intro and the main window both open at this size.
+// 1920 × 1080 (or the largest 16:9 that fits a smaller screen), centered on the game screen: the middle of three
+// monitors, the middle part of one spanned across three, or else the main screen (app/screens.js). The intro and the
+// main window both open there.
 function hdBounds() {
   const { screen } = require('electron');
-  const area = screen.getPrimaryDisplay().bounds, k = Math.min(1, area.width / 1920, area.height / 1080);
+  const gs = screens.gameScreen(screen.getAllDisplays().map(d => d.bounds));
+  const area = gs.multi ? gs.rect : screen.getPrimaryDisplay().bounds, k = Math.min(1, area.width / 1920, area.height / 1080);
   const width = Math.round(1920 * k), height = Math.round(1080 * k);
   return { x: Math.round(area.x + (area.width - width) / 2), y: Math.round(area.y + (area.height - height) / 2), width, height };
 }
@@ -813,10 +825,18 @@ ipcMain.handle('emu:launch', async (_e, req) => {
     if (!port.ok) return { ok: false, error: port.error };
     exe = port.exe; cwd = port.dir; runArgs = [];
   }
+  // Three screens: the game goes on the middle one, borderless at 1920 × 1080, not fullscreen across all of them
+  // (app/screens.js). RetroArch places itself from settings; other emulators' windows are moved there.
+  const gs = req.gameScreen === false ? { multi: false } : screens.gameScreen(require('electron').screen.getAllDisplays().map(d => d.bounds));
+  if (gs.multi) {
+    runArgs = screens.dropFullscreen(req.emuId, runArgs);
+    if (req.emuId === 'retroarch') runArgs = ['--appendconfig', screens.writeRetroarchCfg(app.getPath('userData'), gs.rect), ...runArgs];
+  }
   let child;
   try {
     child = spawn(exe, runArgs, { cwd, detached: false, windowsHide: false, env: { ...process.env, ...(req.env || {}) } });
   } catch (err) { return { ok: false, error: String(err.message || err) }; }
+  if (gs.multi && req.emuId !== 'retroarch' && child.pid) placeOnGameScreen(child.pid, gs.rect);
   const started = Date.now();
   running = { child, gameId: req.gameId, started, title: req.title || '', emuId: req.emuId || '', freeze: req.pauseFreeze !== false };
   let errOut = '';
