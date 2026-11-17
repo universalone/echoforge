@@ -39,7 +39,7 @@ const ico = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 const DEFAULTS = {
   startView: 'home', launchAtLogin: false, autoScan: true,
   sideMore: false, gameScreen: true, wheel: null, wheelProfiles: [], wheelActive: '', wheelPcsx2Index: 1,skin: 'forge', skins: [], dynColors: false, homeLayout: 'classic', layouts: [], pinned: [], theme: 'ember', mode: 'dark', card: 184, titles: true, fx: true, neon: 'breathe', neonSpeed: 100, bgArt: true, bgBlur: 12, bgArtStrength: 45, motion: 'full', scale: 100, cover: 'portrait', compact: false,
-  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false,
+  sort: 'title', hideOffline: false, showHidden: false, scanDepth: 6, ignore: '', romRoot: 'D:\\ROMs', storageRoot: '', autoArt: true, autoAbout: true, splash: 'forge', splashFile: '', splashName: '', splashSize: 'hd', splashSizeV: 2, splashMin: 2.4, splashToEnd: true, splashSound: false, splashFit: 'cover', xboxUnityArt: false, gameTdbArt: false, serialArt: true,
   shareOn: false, shareCode: '', shareHost: '', shareRemoteCode: '', shareDest: '',
   inboxFolder: '', inboxRecycle: true, inboxAutoClean: true, inboxMinFree: 15,
   dlAutoSwitch: false, dlSwitchAtGB: 100, dlTarget: 'D:\\Downloads', dlPrevFolder: '', dlSwitchedAt: 0, dlWarned: '', compatCheck: true, compatBadges: true, padAutoSetup: true,
@@ -76,6 +76,8 @@ function hydrate(raw) {
   s.settings = { ...DEFAULTS, ...(raw.settings || {}) };
   if ((raw.settings || {}).splashSizeV !== 2) Object.assign(s.settings, { splashSize: 'hd', splashSizeV: 2 }); // the intro now opens at 1920 × 1080
   // Wheel profiles (one per wheel or rim): a wheel set up before profiles existed becomes the first one.
+  // PS1/PS2 covers by disc serial are new: games that found no cover by name look again now, not in a week.
+  if (!(raw.settings || {}).serialArtV) { s.settings.serialArtV = 1; for (const g of raw.games || []) if ((g.console === 'ps1' || g.console === 'ps2') && !g.cover) g.artTried = 0; }
   s.settings.wheelProfiles = Array.isArray(s.settings.wheelProfiles) ? [...s.settings.wheelProfiles] : []; // its own list, never DEFAULTS' one
   if (s.settings.wheel && !s.settings.wheelProfiles.length) {
     s.settings.wheelProfiles.push({ id: 'w1', name: s.settings.wheel.name || 'My wheel', wheel: s.settings.wheel });
@@ -633,7 +635,7 @@ async function fetchMissingArt(force = false) {
     const base = parts[parts.length - 1].replace(/\.[^.]+$/, '').replace(/\.nkit$/i, '');
     // A PS3 game is always EBOOT.BIN: its game folder ("Title [BLUS00001]") carries the name.
     const folder = /^eboot$/i.test(base) ? cleanTitle(g.path, g.console).title : parts[parts.length - 2];
-    const r = await window.ef.fetchArt({ id: g.id, console: g.console, names: [g.title, folder, base], file: g.path, xboxUnity: set().xboxUnityArt, gameTdb: set().gameTdbArt, titleId: g.titleId });
+    const r = await window.ef.fetchArt({ id: g.id, console: g.console, names: [g.title, folder, base], file: g.path, xboxUnity: set().xboxUnityArt, gameTdb: set().gameTdbArt, serialArt: set().serialArt, titleId: g.titleId });
     g.artTried = Date.now();
     if (r && r.ok) { forgetImage(r.path); g.cover = r.path; g.artAuto = true; n++; } // same file name may already be cached
   }
@@ -1524,6 +1526,7 @@ const SETTINGS = [
     ['autoArt', 'Download missing box art', 'Covers come from the libretro thumbnails library (the one RetroArch uses), Only console and game names are sent.', 'toggle'],
     ['autoAbout', 'Download game synopses', 'A short summary, year, genre and developer for each game’s page, from Wikipedia and Wikidata. Only the game’s name is sent.', 'toggle'],
     ['xboxUnityArt', 'Xbox 360 covers from XboxUnity', 'A community cover database, used when libretro has no cover. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
+    ['serialArt', 'PS1 and PS2 covers by disc serial', 'When libretro has no cover under the game’s name, the disc’s serial (like SLUS-20312) finds it in the cover collection PCSX2 uses, on GitHub. Only the serial is sent.', 'toggle'],
     ['gameTdbArt', 'PS3 covers from GameTDB', 'A community cover database with box art for most PS3 games, used in place of the small disc icon. Only the disc’s title ID is sent. Off until you turn it on.', 'toggle'],
     ['compatCheck', 'Check which games run', 'Looks up PS3 games on RPCS3’s compatibility list and Xbox 360 games on Xenia Canary’s. Only the game’s disc ID is sent. Refreshed weekly.', 'toggle'],
     ['compatBadges', 'Show “will it run?” badges on covers', 'The game’s details always show it.', 'toggle'],
@@ -2187,7 +2190,7 @@ document.addEventListener('change', async (ev) => {
     if (k === 'disableGpu') toast('Restart EchoForge to apply.');
     if (k === 'inboxFolder') { window.ef.inbox.watch(inboxFolders()); refreshInbox(); }
     // A new cover source was turned on: look again now for the games it covers, rather than waiting a week.
-    if ((k === 'gameTdbArt' || k === 'xboxUnityArt') && v) { const cid = k === 'gameTdbArt' ? 'ps3' : 'x360'; for (const g of S.games) if (g.console === cid && !g.cover) g.artTried = 0; fetchMissingArt(); }
+    if ((k === 'gameTdbArt' || k === 'xboxUnityArt' || k === 'serialArt') && v) { const cids = { gameTdbArt: ['ps3'], xboxUnityArt: ['x360'], serialArt: ['ps1', 'ps2'] }[k]; for (const g of S.games) if (cids.includes(g.console) && !g.cover) g.artTried = 0; fetchMissingArt(); }
     if (['dlAutoSwitch', 'dlTarget', 'dlSwitchAtGB'].includes(k)) { set().dlWarned = ''; checkDownloadsDrive(); }
     if (['sort', 'hideOffline', 'showHidden', 'titles', 'compact'].includes(k) || route.view === 'settings') render();
   }

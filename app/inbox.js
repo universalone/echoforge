@@ -174,7 +174,10 @@ async function classifyDisc(read, name, total, isCD) {
   const ext = path.extname(name).toLowerCase();
   if (isCD) { // raw 2352-byte CD sectors: PVD system id at sector 16, after the 24-byte sector header
     const b = await read(16 * 2352 + 24 + 8, 32);
-    return b.toString('latin1').includes('PLAYSTATION') ? { console: 'ps1', why: 'PlayStation CD' } : { console: '?', why: 'CD image of another system' };
+    if (!b.toString('latin1').includes('PLAYSTATION')) return { console: '?', why: 'CD image of another system' };
+    // Some PS2 games came on CD: their SYSTEM.CNF boots with BOOT2.
+    const boot = await cnfBoot(rawSectors(read, (await read(15, 1))[0] === 1 ? 16 : 24)).catch(() => null);
+    return boot && boot.console === 'ps2' ? { console: 'ps2', why: 'PlayStation 2 CD' } : { console: 'ps1', why: 'PlayStation CD' };
   }
   let b = await read(0, 0x10000);
   if (b.length > 12 && b.subarray(0, 12).equals(CD_SYNC)) return classifyDisc(read, name, total, true); // lone .bin with raw sectors
@@ -204,6 +207,43 @@ async function classifyDisc(read, name, total, isCD) {
   const game360 = await x360(read, total); if (game360) return game360;
   if (ext === '.cso') return { console: 'psp', why: 'Compressed PSP image' };
   return { console: '?', why: 'Not a disc format EchoForge knows' };
+}
+// A PS1 or PS2 disc's serial (e.g. SLUS-20312) and which console it boots on, from SYSTEM.CNF: "BOOT2 = cdrom0:\SLUS_203.12;1"
+// on PS2, "BOOT = cdrom:\SCUS_949.00;1" on PS1. Reads .iso (2048-byte or raw 2352-byte sectors), .bin, .img, .cso and a .cue's
+// first track. null when the disc has none (some early PS1 discs boot PSX.EXE) or the image can't be read (.chd).
+// 2048-byte data sectors of a raw 2352-byte CD image; skip is the sector header (mode 1: 16 bytes, mode 2: 24).
+const rawSectors = (read, skip) => async (lba, n = 1) => { const parts = []; for (let i = 0; i < n; i++) parts.push(await read((lba + i) * 2352 + skip, 2048)); return Buffer.concat(parts); };
+// SYSTEM.CNF's boot line, read through sec(lba, n).
+async function cnfBoot(sec) {
+  const pvd = await sec(16);
+  if (pvd.length < 190 || pvd.toString('latin1', 1, 6) !== 'CD001') return null;
+  const cnf = await isoFind(sec, pvd.readUInt32LE(158), pvd.readUInt32LE(166), 'SYSTEM.CNF');
+  if (!cnf) return null;
+  const txt = (await sec(cnf.lba)).toString('latin1', 0, Math.min(cnf.size, 2048));
+  const m = txt.match(/BOOT(2?)\s*=\s*cdrom0?:\\*([A-Z]{4})[_-](\d{3})\.?(\d{2})/i);
+  return m ? { serial: `${m[2].toUpperCase()}-${m[3]}${m[4]}`, console: m[1] ? 'ps2' : 'ps1' } : null;
+}
+// The .bin a .cue's first track names. If that file isn't there (the .bin was renamed and the .cue wasn't) and the folder
+// holds just one .bin, that one; `broken` says the .cue needs fixing.
+async function cueTrack(cueFile) {
+  const cue = await fsp.readFile(cueFile, 'latin1').catch(() => '');
+  const m = cue.match(/^\s*FILE\s+"([^"]+)"/im) || cue.match(/^\s*FILE\s+(\S+)/im);
+  if (!m) return null;
+  const dir = path.dirname(cueFile), named = path.join(dir, m[1]);
+  if (fs.existsSync(named)) return { file: named, broken: false };
+  const bins = (await fsp.readdir(dir).catch(() => [])).filter(n => /\.bin$/i.test(n));
+  return bins.length === 1 ? { file: path.join(dir, bins[0]), broken: true, named: m[1] } : null;
+}
+async function discSerial(file) {
+  let f = file;
+  if (/\.cue$/i.test(f)) { const t = await cueTrack(f); if (!t) return null; f = t.file; }
+  if (!/\.(iso|bin|img|cso)$/i.test(f)) return null;
+  const read = reader(f);
+  try {
+    const head = await read(0, 24);
+    const raw = head.length >= 16 && head.subarray(0, 12).equals(CD_SYNC);
+    return await cnfBoot(raw ? rawSectors(read, head[15] === 1 ? 16 : 24) : sectors(read, head.toString('latin1', 0, 4) === 'CISO'));
+  } catch { return null; } finally { read.close(); }
 }
 async function classifyPkg(read) {
   const b = await read(0, 0x1000);
@@ -600,4 +640,4 @@ function register({ ipcMain, shell, getWin, cacheFile: cf }) {
   });
 }
 
-module.exports = { register, scan, classifyDisc, reader, importPs3Folder, importGeneric, keepFrom, installInRpcs3, cancelImport, _job: () => job, _setJob: j => { job = j; } };
+module.exports = { register, scan, classifyDisc, discSerial, cueTrack, reader, importPs3Folder, importGeneric, keepFrom, installInRpcs3, cancelImport, _job: () => job, _setJob: j => { job = j; } };

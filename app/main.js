@@ -551,7 +551,19 @@ async function gameTdbCover(titleId) {
   return null;
 }
 
-ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnity, gameTdb, titleId }) => {
+// PS1 and PS2: when libretro has no cover under the game's name (a different title, or a PS2 CD filed as PS1), the disc's serial
+// from SYSTEM.CNF finds it in xlenore's cover collection on GitHub, the one PCSX2 downloads covers from. Only the serial is sent.
+const inbox = require('./inbox');
+const SERIAL_COVERS = { ps1: 'https://raw.githubusercontent.com/xlenore/psx-covers/main/covers/default/', ps2: 'https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/' };
+async function serialCover(file) {
+  const id = await inbox.discSerial(file); if (!id || !/^[A-Z]{4}-\d{5}$/.test(id.serial)) return null;
+  const res = await fetch(SERIAL_COVERS[id.console] + id.serial + '.jpg', { headers: { 'User-Agent': 'EchoForge' } });
+  if (!res.ok) return null;
+  const pic = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+  return pic.isEmpty() ? null : { buf: pic.toPNG(), name: 'Cover for ' + id.serial };
+}
+
+ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnity, gameTdb, titleId, serialArt }) => {
   const sys = ART_SYSTEMS[cid]; if (!sys) return { ok: false, reason: 'unsupported' };
   try {
     let buf = null, name = null;
@@ -564,6 +576,10 @@ ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnit
     if (!buf && xboxUnity && cid === 'x360' && file) {
       const tid = await x360TitleId(file).catch(() => null);
       if (tid) { buf = await xboxUnityCover(tid); name = 'XboxUnity ' + tid; }
+    }
+    if (!buf && serialArt && (cid === 'ps1' || cid === 'ps2') && file) {
+      const c = await serialCover(file).catch(() => null);
+      if (c) ({ buf, name } = c);
     }
     if (!buf) return { ok: false, reason: 'nomatch' };
     if (buf.subarray(1, 4).toString() !== 'PNG') return { ok: false, reason: 'not an image' };
@@ -708,7 +724,7 @@ async function pspIsoMeta(file) {
   } finally { await fh.close(); }
 }
 
-require('./inbox').register({ ipcMain, shell, getWin: () => win, cacheFile: path.join(app.getPath('userData'), 'inbox-cache.json') });
+inbox.register({ ipcMain, shell, getWin: () => win, cacheFile: path.join(app.getPath('userData'), 'inbox-cache.json') });
 require('./compat').register({ ipcMain, app, getWin: () => win, x360TitleId });
 require('./backup').register({ ipcMain, app, shell });
 require('./downloads').register({ ipcMain });

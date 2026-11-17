@@ -79,8 +79,8 @@ window.EF_CONSOLES = [
   {
     id: 'ps2', name: 'PlayStation 2', short: 'PS2', dir: 'Playstation 2', speed: 'any', maker: 'Sony', group: 'classic', year: 2000,
     hue: ['#9aa8ff', '#1c2266'], emulators: ['pcsx2'],
-    rule: { ext: ['.iso', '.chd', '.cso', '.gz'] }, accept: 'any',
-    ram: 2, maturity: 'mature', formats: '.chd (smallest), .iso, .cso',
+    rule: { ext: ['.iso', '.chd', '.cso', '.gz', '.cue'] }, accept: 'any', // .cue: PS2 games that came on CD
+    ram: 2, maturity: 'mature', formats: '.chd (smallest), .iso, .cso, .cue/.bin for CD games',
     bios: [{ id: 'bios', label: 'PS2 BIOS (scph*.bin)', pattern: '^(scph|ps2).*\\.bin$', required: true, help: 'Dumped from your own PS2 using the PCSX2 BIOS dumper.' }]
   },
   {
