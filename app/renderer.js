@@ -78,6 +78,8 @@ function hydrate(raw) {
   // Wheel profiles (one per wheel or rim): a wheel set up before profiles existed becomes the first one.
   // PS1/PS2 covers by disc serial are new: games that found no cover by name look again now, not in a week.
   if (!(raw.settings || {}).serialArtV) { s.settings.serialArtV = 1; for (const g of raw.games || []) if ((g.console === 'ps1' || g.console === 'ps2') && !g.cover) g.artTried = 0; }
+  // 0.2.15: covers come from GitHub when libretro's server is down, as it was in November 2026. Games that missed look again now.
+  if (!(raw.settings || {}).artGitHubV) { s.settings.artGitHubV = 1; for (const g of raw.games || []) if (!g.cover) g.artTried = 0; }
   s.settings.wheelProfiles = Array.isArray(s.settings.wheelProfiles) ? [...s.settings.wheelProfiles] : []; // its own list, never DEFAULTS' one
   if (s.settings.wheel && !s.settings.wheelProfiles.length) {
     s.settings.wheelProfiles.push({ id: 'w1', name: s.settings.wheel.name || 'My wheel', wheel: s.settings.wheel });

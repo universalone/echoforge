@@ -455,7 +455,11 @@ ipcMain.handle('game:recycle', async (_e, o) => {
 
 // ---------- box art ----------
 // Covers come from the libretro thumbnails library (the open collection RetroArch uses). Only console + game names are sent.
+// thumbnails.libretro.com is tried first; when it doesn't answer (it stopped listing its folders in November 2026), the same
+// collection's official copy on GitHub (github.com/libretro-thumbnails, one repository per system) is used instead.
 const ART_BASE = 'https://thumbnails.libretro.com/';
+const ART_GH = 'https://raw.githubusercontent.com/libretro-thumbnails/';
+const artRepo = sys => sys.replace(/ /g, '_'); // "Sony - PlayStation 2" -> "Sony_-_PlayStation_2"
 const ART_SYSTEMS = { ps1: 'Sony - PlayStation', ps2: 'Sony - PlayStation 2', ps3: 'Sony - PlayStation 3', ps4: 'Sony - PlayStation 4', psp: 'Sony - PlayStation Portable', gc: 'Nintendo - GameCube', wii: 'Nintendo - Wii', xbox: 'Microsoft - Xbox', x360: 'Microsoft - Xbox 360' };
 const artLists = new Map();
 // kind: Named_Boxarts (covers), Named_Snaps (in-game screenshots) or Named_Titles (title screens).
@@ -463,11 +467,37 @@ async function artList(sys, kind = 'Named_Boxarts') {
   const key = sys + '|' + kind; if (artLists.has(key)) return artLists.get(key);
   const cache = path.join(app.getPath('userData'), 'art-index', sys + (kind === 'Named_Boxarts' ? '' : ' ' + kind) + '.json');
   try { if (Date.now() - (await fsp.stat(cache)).mtimeMs < 7 * 864e5) { const l = JSON.parse(await fsp.readFile(cache, 'utf8')); artLists.set(key, l); return l; } } catch {}
-  const res = await fetch(ART_BASE + encodeURIComponent(sys) + '/' + kind + '/', { headers: { 'User-Agent': 'EchoForge' } });
-  if (!res.ok) throw new Error(kind + ' index HTTP ' + res.status);
-  const list = [...(await res.text()).matchAll(/href="([^"]+\.png)"/g)].map(m => decodeURIComponent(m[1]));
+  let list = null;
+  try { list = await artIndexLibretro(sys, kind); } catch {}
+  if (!list) try { list = await artIndexGitHub(sys, kind); } catch {}
+  if (!list) { // both unreachable: last week's list is better than none
+    try { list = JSON.parse(await fsp.readFile(cache, 'utf8')); } catch { throw new Error(kind + ' list unavailable'); }
+    artLists.set(key, list); return list;
+  }
   await fsp.mkdir(path.dirname(cache), { recursive: true }); await fsp.writeFile(cache, JSON.stringify(list));
   artLists.set(key, list); return list;
+}
+async function artIndexLibretro(sys, kind) {
+  const res = await fetch(ART_BASE + encodeURIComponent(sys) + '/' + kind + '/', { headers: { 'User-Agent': 'EchoForge' } });
+  if (!res.ok) return null;
+  const list = [...(await res.text()).matchAll(/href="([^"]+\.png)"/g)].map(m => decodeURIComponent(m[1]));
+  return list.length ? list : null;
+}
+// The system's repository: its top folder, then the one folder (Named_Boxarts etc.). Two GitHub API calls per system a week.
+async function artIndexGitHub(sys, kind) {
+  const api = 'https://api.github.com/repos/libretro-thumbnails/' + artRepo(sys) + '/git/trees/';
+  const get = async sha => { const r = await fetch(api + sha, { headers: { 'User-Agent': 'EchoForge', Accept: 'application/vnd.github+json' } }); if (!r.ok) throw new Error('GitHub HTTP ' + r.status); return r.json(); };
+  const top = await get('HEAD'), dir = (top.tree || []).find(t => t.path === kind && t.type === 'tree');
+  if (!dir) return [];
+  return ((await get(dir.sha)).tree || []).filter(t => t.type === 'blob' && /\.png$/i.test(t.path)).map(t => t.path);
+}
+// One picture from the collection, from libretro's server or else GitHub. null when neither has it.
+async function artFile(sys, kind, name) {
+  for (const url of [ART_BASE + encodeURIComponent(sys) + '/' + kind + '/' + encodeURIComponent(name),
+    ART_GH + artRepo(sys) + '/master/' + kind + '/' + encodeURIComponent(name)]) {
+    try { const res = await fetch(url, { headers: { 'User-Agent': 'EchoForge' } }); if (res.ok) return Buffer.from(await res.arrayBuffer()); } catch {}
+  }
+  return null;
 }
 // Loose name key: no regions/tags, "Title, The" -> "The Title", no articles or "vs.", only letters and digits.
 const artKey = s => s.toLowerCase().replace(/\.png$/, '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/^(.*?),\s*the\b/, 'the $1')
@@ -568,11 +598,9 @@ ipcMain.handle('art:fetch', async (_e, { id, console: cid, names, file, xboxUnit
   try {
     let buf = null, name = null;
     if (gameTdb && cid === 'ps3') { buf = await gameTdbCover(titleId); if (buf) name = 'GameTDB ' + titleId; }
-    const hit = !buf && pickArt(await artList(sys), (names || []).filter(Boolean));
-    if (hit) {
-      const res = await fetch(ART_BASE + encodeURIComponent(sys) + '/Named_Boxarts/' + encodeURIComponent(hit), { headers: { 'User-Agent': 'EchoForge' } });
-      if (res.ok) { buf = Buffer.from(await res.arrayBuffer()); name = hit; }
-    }
+    // A list that can't be had doesn't stop the other sources below.
+    const hit = !buf && pickArt(await artList(sys).catch(() => []), (names || []).filter(Boolean));
+    if (hit) { buf = await artFile(sys, 'Named_Boxarts', hit); if (buf) name = hit; }
     if (!buf && xboxUnity && cid === 'x360' && file) {
       const tid = await x360TitleId(file).catch(() => null);
       if (tid) { buf = await xboxUnityCover(tid); name = 'XboxUnity ' + tid; }
@@ -599,9 +627,7 @@ ipcMain.handle('art:shots', async (_e, { id, console: cid, names }) => {
     await fsp.mkdir(dir, { recursive: true });
     for (const [kind, tag] of [['Named_Snaps', 'snap'], ['Named_Titles', 'title']]) {
       const hit = pickArt(await artList(sys, kind).catch(() => []), (names || []).filter(Boolean)); if (!hit) continue;
-      const res = await fetch(ART_BASE + encodeURIComponent(sys) + '/' + kind + '/' + encodeURIComponent(hit), { headers: { 'User-Agent': 'EchoForge' } });
-      if (!res.ok) continue;
-      const buf = Buffer.from(await res.arrayBuffer()); if (buf.subarray(1, 4).toString() !== 'PNG') continue;
+      const buf = await artFile(sys, kind, hit); if (!buf || buf.subarray(1, 4).toString() !== 'PNG') continue;
       const file = path.join(dir, `${String(id).replace(/[^\w-]/g, '')}-${tag}.png`); await fsp.writeFile(file, buf); out[tag] = file;
     }
     return { ok: true, ...out };
